@@ -1,0 +1,13 @@
+component0:
+  min_resolution_px: 512
+  aspect_ratio_range: [0.7, 1.4]
+  x1024_size: 1024
+  x224_size: 224
+  clahe:
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+    default_by_dataset:
+      montgomery: true
+      shenzhen: true
+      tbx11k: false
+      nih_cxr14: false

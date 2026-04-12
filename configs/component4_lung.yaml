@@ -1,0 +1,5 @@
+component4_lung:
+  status: placeholder
+  notes:
+    - reserved for the Component 4 lung-mask training scaffold
+    - intentionally not implemented in this pass

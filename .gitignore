@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local env
+.env
+
+# Artifacts
+outputs/
+logs/
+
+# Data and checkpoints
+data/raw/*
+data/interim/*
+data/processed/*
+data/splits/*
+data/cache/*
+checkpoints/sam/*
+checkpoints/medsam/*
+checkpoints/txv/*
+checkpoints/baseline/*
+checkpoints/reports/*
+
+# Keep placeholder files
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/splits/.gitkeep
+!data/cache/.gitkeep
+!checkpoints/sam/.gitkeep
+!checkpoints/medsam/.gitkeep
+!checkpoints/txv/.gitkeep
+!checkpoints/baseline/.gitkeep
+!checkpoints/reports/.gitkeep

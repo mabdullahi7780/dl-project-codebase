@@ -1,0 +1,13 @@
+project_root: .
+external_data_root: ${EXTERNAL_DATA_ROOT:-E:/tb_cxr_datasets}
+
+datasets:
+  montgomery: ${MONTGOMERY_ROOT:-E:/tb_cxr_datasets/Montgomery}
+  shenzhen: ${SHENZHEN_ROOT:-E:/tb_cxr_datasets/Shenzhen}
+  tbx11k: ${TBX11K_ROOT:-E:/tb_cxr_datasets/TBX11K}
+  nih_cxr14: ${NIH_CXR14_ROOT:-E:/tb_cxr_datasets/NIH_ChestXray14}
+
+artifacts:
+  notebook_cache: data/cache/notebooks
+  processed: data/processed
+  reports: checkpoints/reports

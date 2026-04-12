@@ -1,0 +1,5 @@
+component1_dann:
+  status: placeholder
+  notes:
+    - reserved for the Component 1 training scaffold
+    - intentionally not implemented in this pass
