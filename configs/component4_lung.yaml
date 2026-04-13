@@ -1,7 +1,9 @@
 component4_lung:
   model:
     backend: auto
-    weights: flaiagiammarino/medsam-vit-base
+    checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+    model_type: vit_b
+    mask_threshold: 0.5
   training:
     seed: 1337
     device: null

@@ -44,7 +44,12 @@ def main() -> None:
         return
 
     device = pick_device(config["training"].get("device"))
-    model = Component4MedSAM(backend=config["model"].get("backend", "mock")).to(device)
+    model = Component4MedSAM(
+        backend=config["model"].get("backend", "mock"),
+        checkpoint_path=config["model"].get("checkpoint_path"),
+        model_type=config["model"].get("model_type", "vit_b"),
+        mask_threshold=float(config["model"].get("mask_threshold", 0.5)),
+    ).to(device)
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=float(config["training"]["lr"]))

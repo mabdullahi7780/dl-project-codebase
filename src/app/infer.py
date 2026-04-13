@@ -75,6 +75,7 @@ def build_models(
     device: torch.device,
 ) -> tuple[Component1DANNModel, Component2SoftDomainContext, Component4MedSAM]:
     component1_cfg = config.get("component1", {})
+    component4_cfg = config.get("component4", {})
     encoder = build_component1_encoder(
         Component1EncoderConfig(
             backend=str(component1_cfg.get("backend", "auto")),
@@ -88,7 +89,10 @@ def build_models(
         weights=str(config.get("component2", {}).get("weights", "densenet121-res224-all")),
     ).to(device)
     component4_model = Component4MedSAM(
-        backend=str(config.get("component4", {}).get("backend", "auto"))
+        backend=str(component4_cfg.get("backend", "auto")),
+        checkpoint_path=component4_cfg.get("checkpoint_path"),
+        model_type=str(component4_cfg.get("model_type", "vit_b")),
+        mask_threshold=float(component4_cfg.get("mask_threshold", 0.5)),
     ).to(device)
     component1_model.eval()
     component2_model.eval()
@@ -253,7 +257,7 @@ def run_single_image_inference(
                 "device": describe_device(device),
                 "component1_backend": component1_model.encoder.active_backend,
                 "component2_backend": component2_model.active_backend,
-                "component4_backend": component4_model.backend,
+                "component4_backend": component4_model.active_backend,
                 "selected_classes": lesion_proposal.selected_classes[0],
                 "boundary_score": boundary.boundary_score,
                 "fp_probability": fp_audit.fp_probability,

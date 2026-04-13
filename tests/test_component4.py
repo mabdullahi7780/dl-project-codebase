@@ -1,6 +1,10 @@
 import pytest
 import torch
-from src.components.component4_lung import Component4MedSAM, bce_dice_loss
+from src.components.component4_lung import (
+    Component4MedSAM,
+    bce_dice_loss,
+    resolve_component4_backend,
+)
 
 def test_component4_tensor_contract() -> None:
     model = Component4MedSAM(backend="mock")
@@ -17,6 +21,15 @@ def test_component4_tensor_contract() -> None:
     
     assert all("decoder" in name for name in trainable_params), "Only mask decoder should be trainable"
     assert all("encoder" in name for name in frozen_params), "ViT-B backbone must be totally frozen"
+    assert model.active_backend == "mock"
+
+
+def test_component4_auto_backend_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.components.component4_lung._has_segment_anything", lambda: True)
+    monkeypatch.setattr("src.components.component4_lung._checkpoint_available", lambda path: path == "demo.pth")
+
+    assert resolve_component4_backend("auto", "demo.pth") == "medsam"
+    assert resolve_component4_backend("auto", None) == "mock"
 
 def test_bce_dice_loss() -> None:
     logits = torch.randn(2, 1, 256, 256)
