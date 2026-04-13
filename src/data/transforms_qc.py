@@ -11,6 +11,10 @@ def to_grayscale_tensor(image: np.ndarray | torch.Tensor) -> torch.Tensor:
     """Convert a grayscale image to a CPU float32 tensor with shape [H, W]."""
 
     if isinstance(image, np.ndarray):
+        # PIL-backed arrays are often non-writable views; copy them so torch
+        # does not warn about undefined behavior on non-writable memory.
+        if not image.flags.writeable:
+            image = np.array(image, copy=True)
         tensor = torch.from_numpy(image)
     elif isinstance(image, torch.Tensor):
         tensor = image.detach().cpu()
