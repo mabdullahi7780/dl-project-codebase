@@ -5,6 +5,10 @@ import os
 import torch
 
 
+def _prepare_mps_runtime() -> None:
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+
 def pick_device(prefer: str | None = None) -> torch.device:
     """Pick the best available torch device.
 
@@ -17,6 +21,7 @@ def pick_device(prefer: str | None = None) -> torch.device:
     if choice == "cuda" and torch.cuda.is_available():
         return torch.device("cuda")
     if choice == "mps" and torch.backends.mps.is_available():
+        _prepare_mps_runtime()
         return torch.device("mps")
     if choice == "cpu":
         return torch.device("cpu")
@@ -24,6 +29,7 @@ def pick_device(prefer: str | None = None) -> torch.device:
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
+        _prepare_mps_runtime()
         return torch.device("mps")
     return torch.device("cpu")
 

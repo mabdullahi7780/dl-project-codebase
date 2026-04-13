@@ -1,7 +1,7 @@
 component1_dann:
   encoder:
     backend: auto
-    checkpoint_path: ${SAM_VIT_H_CKPT:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/sam_vit_h_4b8939.pth}
+    checkpoint_path: ${SAM_VIT_H_CKPT:-checkpoints/sam/sam_vit_h_4b8939.pth}
     freeze_backbone: true
     input_size: 1024
     patch_size: 16

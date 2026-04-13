@@ -18,6 +18,7 @@ from src.components.component1_dann import (
 from src.components.component1_encoder import (
     Component1EncoderConfig,
     build_component1_encoder,
+    resolve_component1_backend,
     save_trainable_state_dict,
 )
 from src.training.train_component1_dann import (
@@ -42,6 +43,14 @@ def test_component1_encoder_returns_expected_tensor_contract() -> None:
     assert tuple(img_emb.shape) == (2, 256, 64, 64)
     assert any("qkv" in name for name in encoder.lora_targets)
     assert encoder.active_backend == "mock"
+
+
+def test_component1_auto_backend_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.components.component1_encoder._has_segment_anything", lambda: True)
+    monkeypatch.setattr("src.components.component1_encoder._checkpoint_available", lambda path: path == "demo.pth")
+
+    assert resolve_component1_backend(Component1EncoderConfig(backend="auto", checkpoint_path="demo.pth")) == "segment_anything"
+    assert resolve_component1_backend(Component1EncoderConfig(backend="auto", checkpoint_path=None)) == "mock"
 
 
 def test_component1_dann_forward_and_loss() -> None:

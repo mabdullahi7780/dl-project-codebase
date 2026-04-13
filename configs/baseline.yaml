@@ -17,7 +17,7 @@ runtime:
 
 component1:
   backend: auto
-  checkpoint_path: null
+  checkpoint_path: checkpoints/sam/sam_vit_h_4b8939.pth
 
 component2:
   backend: auto

@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.utils.checkpoints import load_checkpoint_into_module
+
 
 MEDSAM_IMAGE_SIZE = 1024
 LOW_RES_MASK_SIZE = 256
@@ -115,11 +117,12 @@ class Component4MedSAM(nn.Module):
         from segment_anything import sam_model_registry  # type: ignore
 
         try:
-            sam = sam_model_registry[self.model_type](checkpoint=self.checkpoint_path)
+            sam = sam_model_registry[self.model_type](checkpoint=None)
         except KeyError as exc:
             raise ValueError(
                 f"Unsupported SAM model_type {self.model_type!r}. Expected one of: {sorted(sam_model_registry)}."
             ) from exc
+        load_checkpoint_into_module(sam, self.checkpoint_path)
 
         self.encoder = sam.image_encoder
         self.prompt_encoder = sam.prompt_encoder

@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.utils.checkpoints import load_checkpoint_into_module
+
 
 SAM_INPUT_SIZE = 1024
 SAM_PATCH_SIZE = 16
@@ -216,7 +218,9 @@ class SegmentAnythingViTHEncoder(nn.Module):
                 "segment_anything is not installed. Install it or switch config.encoder.backend to 'mock'."
             ) from exc
 
-        sam = sam_model_registry["vit_h"](checkpoint=checkpoint_path)
+        sam = sam_model_registry["vit_h"](checkpoint=None)
+        if checkpoint_path is not None:
+            load_checkpoint_into_module(sam, checkpoint_path)
         self.image_encoder = sam.image_encoder
         self.register_buffer(
             "pixel_mean",
