@@ -1,0 +1,20 @@
+name: component10_biogpt
+model:
+  type: BioGPT-Large
+  base: microsoft/BioGPT-Large
+  freeze_layers: 1-10
+  trainable_layers: 11-12
+
+training:
+  optimizer: AdamW
+  learning_rate: 1e-5
+  epochs: 5
+  batch_size: 4
+  fine_tune: optional  # ONLY if few-shot output is incoherent
+  dataset: Shenzhen_19_type_TBX11K_synthetic_pairs
+  samples: 100
+
+inference:
+  few_shot_examples: 3
+  faithfulness_checker: scispacy_ner
+  estimated_gpu_hours: 0.5

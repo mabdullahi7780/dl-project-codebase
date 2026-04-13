@@ -1,0 +1,18 @@
+component2_txv:
+  model:
+    backend: auto
+    weights: densenet121-res224-all
+  training:
+    seed: 1337
+    device: null
+    epochs: 10
+    batch_size: 32
+    num_workers: 0
+    lr: 5.0e-4
+    temperature: 0.1
+    patience: 3
+    limit_per_domain: null
+    save_dir: ${COMPONENT2_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component2}
+    save_name: component2_routing_head.pt
+  data:
+    val_split: 0.2

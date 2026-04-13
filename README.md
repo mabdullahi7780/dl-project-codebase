@@ -6,11 +6,16 @@ Current implementation status:
 
 - full directory scaffold is in place
 - Component 0 (`QC + normalisation`) is implemented
+- Component 1 (`shared image encoder + LoRA + DANN head`) is implemented
 - a companion notebook lives in `notebooks/component0_qc.ipynb`
+- a companion notebook lives in `notebooks/component1_dann.ipynb`
 - tests for Component 0 live in `tests/test_component0.py`
+- tests for Component 1 live in `tests/test_component1.py`
 
 The core preprocessing logic is intentionally kept in `src/components/component0_qc.py`.
-The notebook is only for inspection and manual runs against datasets stored on an external HDD.
+The core Component 1 logic is intentionally kept in `src/components/component1_encoder.py`,
+`src/components/component1_dann.py`, and `src/training/train_component1_dann.py`.
+The notebooks are for inspection and manual runs against datasets stored on an external HDD.
 
 ## Environment
 
@@ -32,5 +37,10 @@ You can also store those paths in environment variables or in `configs/paths.yam
 - `src/data/transforms_qc.py`
 - `src/data/harmonise.py`
 - `src/components/component0_qc.py`
+- `src/components/component1_encoder.py`
+- `src/components/component1_dann.py`
+- `src/training/train_component1_dann.py`
 - `tests/test_component0.py`
+- `tests/test_component1.py`
 - `notebooks/component0_qc.ipynb`
+- `notebooks/component1_dann.ipynb`

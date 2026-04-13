@@ -1,0 +1,17 @@
+name: component7_boundary_critic
+model:
+  type: BoundaryCritic
+  base: resnet18
+  pretrained: true
+
+training:
+  optimizer: AdamW
+  learning_rate: 2e-4
+  epochs: 15
+  loss: BCEWithLogitsLoss
+  batch_size: 32
+
+dataset:
+  train: TBX11K_val_stage4_preds
+  positive_montgomery: true
+  nih_hard_negatives: true

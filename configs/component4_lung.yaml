@@ -1,5 +1,17 @@
 component4_lung:
-  status: placeholder
-  notes:
-    - reserved for the Component 4 lung-mask training scaffold
-    - intentionally not implemented in this pass
+  model:
+    backend: auto
+    weights: flaiagiammarino/medsam-vit-base
+  training:
+    seed: 1337
+    device: null
+    epochs: 50
+    batch_size: 4
+    num_workers: 0
+    lr: 5.0e-5
+    patience: 10
+    save_dir: ${COMPONENT4_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component4}
+    save_name: component4_mask_decoder.pt
+  data:
+    val_split: 0.2
+    test_split: 0.1

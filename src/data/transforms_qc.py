@@ -47,6 +47,9 @@ def resize_chw(image: torch.Tensor, size: Sequence[int]) -> torch.Tensor:
     """Resize a grayscale tensor to the requested size using bilinear interpolation."""
 
     chw = ensure_chw(image)
+    if tuple(chw.shape[-2:]) == tuple(size):
+        return chw
+
     resized = F.interpolate(
         chw.unsqueeze(0),
         size=tuple(int(dim) for dim in size),
