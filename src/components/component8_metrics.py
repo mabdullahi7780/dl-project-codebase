@@ -6,7 +6,7 @@ from typing import Mapping, Union, Any
 def compute_timika_score(
     mask_refined: Union[np.ndarray, torch.Tensor],
     lung_mask: Union[np.ndarray, torch.Tensor],
-    mask_e2: Union[np.ndarray, torch.Tensor]
+    mask_e2: Union[np.ndarray, torch.Tensor, None] = None
 ) -> dict[str, Union[float, int, str]]:
     """
     Component 8: Compute Metrics - ALP + Cavity Flag + Timika Score
@@ -33,13 +33,17 @@ def compute_timika_score(
         mask_refined = mask_refined[0]
     if lung_mask.ndim == 3 and lung_mask.shape[0] == 1:
         lung_mask = lung_mask[0]
-    if mask_e2.ndim == 3 and mask_e2.shape[0] == 1:
+    if mask_e2 is not None and mask_e2.ndim == 3 and mask_e2.shape[0] == 1:
         mask_e2 = mask_e2[0]
 
     # Convert to binary
     lesion_bin = (mask_refined > 0.5).astype(np.uint8)  # [1024, 1024]
     lung_bin = (lung_mask > 0.5).astype(np.uint8)       # [1024, 1024]
-    cavity_bin = (mask_e2 > 0.6).astype(np.uint8)       # [256, 256]
+    cavity_bin = (
+        np.zeros((256, 256), dtype=np.uint8)
+        if mask_e2 is None
+        else (mask_e2 > 0.6).astype(np.uint8)
+    )
 
     # ALP (Affected Lung Percentage)
     lesion_in_lung = lesion_bin * lung_bin

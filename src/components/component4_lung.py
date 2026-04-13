@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+@dataclass(slots=True)
+class LungMaskOutput:
+    lung_mask_256: torch.Tensor
+    lung_mask_1024: torch.Tensor
+    lung_logits_256: torch.Tensor
 
 class MockMedSAMEncoder(nn.Module):
     def __init__(self):
@@ -35,7 +44,7 @@ class Component4MedSAM(nn.Module):
         for param in self.decoder.parameters():
             param.requires_grad = True
 
-    def forward(self, x_3ch: torch.Tensor) -> torch.Tensor:
+    def predict_masks(self, x_3ch: torch.Tensor) -> LungMaskOutput:
         # x_3ch: [B, 3, 1024, 1024]
         if x_3ch.ndim != 4 or x_3ch.shape[1] != 3 or tuple(x_3ch.shape[2:]) != (1024, 1024):
             raise ValueError(f"Expected input [B, 3, 1024, 1024], got {tuple(x_3ch.shape)}")
@@ -48,11 +57,18 @@ class Component4MedSAM(nn.Module):
         mask_logits = self.decoder(img_emb, bbox)
         
         mask_prob = torch.sigmoid(mask_logits)
-        mask_binary = (mask_prob > 0.5).float()
+        mask_256 = (mask_prob > 0.5).float()
         
-        mask_1024 = F.interpolate(mask_binary, size=(1024, 1024), mode="nearest")
+        mask_1024 = F.interpolate(mask_256, size=(1024, 1024), mode="nearest")
         
-        return mask_1024
+        return LungMaskOutput(
+            lung_mask_256=mask_256,
+            lung_mask_1024=mask_1024,
+            lung_logits_256=mask_logits,
+        )
+
+    def forward(self, x_3ch: torch.Tensor) -> torch.Tensor:
+        return self.predict_masks(x_3ch).lung_mask_1024
 
 def bce_dice_loss(logits: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-5) -> torch.Tensor:
     bce = F.binary_cross_entropy_with_logits(logits, targets)

@@ -102,7 +102,8 @@ def make_x224_txv(image: torch.Tensor | Any) -> torch.Tensor:
 
     grayscale = to_grayscale_tensor(image)
     cropped = center_crop_square(grayscale)
-    return resize_chw(cropped, size=(X224_SIZE, X224_SIZE))
+    resized = resize_chw(cropped, size=(X224_SIZE, X224_SIZE)).clamp(0.0, 1.0)
+    return (resized * 2048.0) - 1024.0
 
 
 def apply_clahe_x1024(

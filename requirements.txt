@@ -1,10 +1,12 @@
 numpy>=1.26
 torch>=2.2
+torchvision>=0.17
 opencv-python-headless>=4.9
 pillow>=10.0
 pyyaml>=6.0
 pydantic>=2.7
 pytest>=8.0
 matplotlib>=3.8
+scipy>=1.11
 jupyter>=1.0
 ipykernel>=6.29

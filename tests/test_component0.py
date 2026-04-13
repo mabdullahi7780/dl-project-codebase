@@ -52,6 +52,8 @@ def test_harmonise_sample_emits_expected_shapes() -> None:
     assert harmonised.x_1024.dtype == torch.float32
     assert harmonised.x_224.dtype == torch.float32
     assert harmonised.x_3ch.dtype == torch.float32
+    assert float(harmonised.x_224.min()) >= -1024.0
+    assert float(harmonised.x_224.max()) <= 1024.0
 
 
 def test_clahe_only_touches_x1024(monkeypatch) -> None:

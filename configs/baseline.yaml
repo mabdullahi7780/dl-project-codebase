@@ -11,3 +11,34 @@ component0:
       shenzhen: true
       tbx11k: false
       nih_cxr14: false
+
+runtime:
+  device: null
+
+component1:
+  backend: auto
+  checkpoint_path: null
+
+component2:
+  backend: auto
+  weights: densenet121-res224-all
+  pathology_flag_threshold: 0.6
+
+component4:
+  backend: auto
+
+baseline_lesion_proposer:
+  suspicious_class_threshold: 0.55
+  fixed_binary_threshold: null
+  min_region_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  fallback_blend: 0.35
+
+component7_refine:
+  min_area_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  weak_boundary_threshold: 0.45
+  suppress_fp_threshold: 0.85
+  caution_fp_threshold: 0.65
