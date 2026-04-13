@@ -16,7 +16,8 @@ venv/
 .env
 
 # Artifacts
-outputs/
+# outputs/
+outputs/batch_run_001
 logs/
 
 # Data and checkpoints

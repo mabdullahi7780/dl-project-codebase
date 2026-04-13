@@ -1,0 +1,38 @@
+{
+  "patient_id": "MCUCXR_0023_0",
+  "modality": "CXR-PA",
+  "scanner_domain": "montgomery",
+  "segmentation": {
+    "n_distinct_lesions": 1,
+    "lesion_area_cm2": 0.0,
+    "boundary_quality_score": 0.67,
+    "fp_probability": 0.03
+  },
+  "scoring": {
+    "ALP": 45.5,
+    "cavity_flag": 0,
+    "timika_score": 45.5,
+    "severity": "moderate",
+    "cavitation_confidence": "not-assessed-baseline"
+  },
+  "pathology_flags": {
+    "atelectasis": true,
+    "consolidation": true,
+    "infiltration": true,
+    "pneumothorax": true,
+    "edema": true,
+    "emphysema": true,
+    "fibrosis": true,
+    "effusion": true,
+    "pneumonia": true,
+    "pleural_thickening": true,
+    "cardiomegaly": false,
+    "nodule": true,
+    "mass": true,
+    "hernia": true,
+    "lung_lesion": false,
+    "fracture": true,
+    "lung_opacity": false,
+    "enlarged_cardiomediastinum": true
+  }
+}

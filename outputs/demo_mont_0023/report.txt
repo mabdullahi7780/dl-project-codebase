@@ -1,0 +1,1 @@
+CXR-PA: baseline CXR analysis. One suspicious lesion region was identified, covering approximately 0.00 cm2. Affected lung percentage is 45.5%, corresponding to moderate estimated severity. Cavitation was not assessed in this baseline configuration.

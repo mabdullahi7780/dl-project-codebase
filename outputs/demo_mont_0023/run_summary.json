@@ -1,0 +1,20 @@
+{
+  "image": "/Volumes/Toshiba HDR/TB_DATA/raw/montgomery/images/MCUCXR_0023_0.png",
+  "dataset": "montgomery",
+  "device": "mps (Apple Silicon)",
+  "component1_backend": "segment_anything",
+  "component2_backend": "xrv",
+  "component4_backend": "medsam",
+  "selected_classes": [
+    "consolidation",
+    "infiltration",
+    "fibrosis",
+    "effusion",
+    "pneumonia",
+    "pleural_thickening",
+    "nodule",
+    "mass"
+  ],
+  "boundary_score": 0.6656182062824605,
+  "fp_probability": 0.032908987998962407
+}
