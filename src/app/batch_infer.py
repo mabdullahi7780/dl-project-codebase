@@ -56,6 +56,8 @@ def main() -> None:
                 component4_decoder_ckpt=args.component4_decoder_ckpt,
                 component1_adapter_path=args.component1_adapter,
             )
+            run_summary_path = sample_outdir / "run_summary.json"
+            run_summary = json.loads(run_summary_path.read_text(encoding="utf-8"))
             results.append(
                 {
                     "sample_id": sample_name,
@@ -63,9 +65,18 @@ def main() -> None:
                     "dataset": dataset,
                     "timika_score": bundle.timika_score,
                     "severity": bundle.severity,
+                    "device": run_summary.get("device"),
+                    "component1_backend": run_summary.get("component1_backend"),
+                    "component1_adapter_path": run_summary.get("component1_adapter_path"),
+                    "component2_backend": run_summary.get("component2_backend"),
+                    "component4_backend": run_summary.get("component4_backend"),
+                    "component4_decoder_ckpt": run_summary.get("component4_decoder_ckpt"),
+                    "boundary_score": run_summary.get("boundary_score"),
+                    "fp_probability": run_summary.get("fp_probability"),
                     "report_path": str(sample_outdir / "report.txt"),
                     "json_path": str(sample_outdir / "evidence.json"),
                     "overlay_path": str(sample_outdir / "overlay.png"),
+                    "run_summary_path": str(run_summary_path),
                 }
             )
 

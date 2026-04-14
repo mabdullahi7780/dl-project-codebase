@@ -335,12 +335,18 @@ def main() -> None:
         component4_decoder_ckpt=args.component4_decoder_ckpt,
         component1_adapter_path=args.component1_adapter,
     )
+    run_summary = json.loads((Path(args.outdir) / "run_summary.json").read_text(encoding="utf-8"))
     print(
         json.dumps(
             {
                 "report_path": str(Path(args.outdir) / "report.txt"),
                 "json_path": str(Path(args.outdir) / "evidence.json"),
                 "overlay_path": str(Path(args.outdir) / "overlay.png"),
+                "component1_backend": run_summary.get("component1_backend"),
+                "component1_adapter_path": run_summary.get("component1_adapter_path"),
+                "component2_backend": run_summary.get("component2_backend"),
+                "component4_backend": run_summary.get("component4_backend"),
+                "component4_decoder_ckpt": run_summary.get("component4_decoder_ckpt"),
                 "timika_score": bundle.timika_score,
                 "severity": bundle.severity,
             },
