@@ -1,0 +1,5 @@
+reporting:
+  status: placeholder
+  notes:
+    - reserved for report generation settings
+    - intentionally not implemented in this pass

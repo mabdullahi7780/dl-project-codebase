@@ -1,0 +1,13 @@
+project_root: .
+external_data_root: ${EXTERNAL_DATA_ROOT:-/Volumes/Toshiba HDR/TB_DATA/raw}
+
+datasets:
+  montgomery: ${MONTGOMERY_ROOT:-/Volumes/Toshiba HDR/TB_DATA/raw/montgomery}
+  shenzhen: ${SHENZHEN_ROOT:-/Volumes/Toshiba HDR/TB_DATA/raw/shenzhen}
+  tbx11k: ${TBX11K_ROOT:-/Volumes/Toshiba HDR/TB_DATA/raw/tbx11k}
+  nih_cxr14: ${NIH_CXR14_ROOT:-/Volumes/Toshiba HDR/TB_DATA/raw/nih_cxr14}
+
+artifacts:
+  notebook_cache: data/cache/notebooks
+  processed: data/processed
+  reports: checkpoints/reports

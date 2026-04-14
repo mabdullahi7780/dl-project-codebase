@@ -1,0 +1,30 @@
+component4_lung:
+  model:
+    backend: auto              # auto -> medsam if checkpoint + segment_anything available, else mock
+    checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+    model_type: vit_b
+    mask_threshold: 0.5         # used for Dice/IoU metric thresholding and inference binarization
+
+  training:
+    seed: 1337
+    device: null                # null -> auto: CUDA > MPS > CPU. Override with "cuda" / "mps" / "cpu".
+    epochs: 40
+    batch_size: 2               # Kaggle T4 16GB-friendly with 1024x1024 inputs; drop to 1 if OOM
+    num_workers: 2              # Kaggle tolerates 2; set 0 on MPS/CPU local
+    lr: 1.0e-4
+    weight_decay: 0.0
+    patience: 8                 # early stop on val Dice plateau
+    amp: true                   # auto-disabled on MPS/CPU; only applied when device is CUDA
+    log_every: 20
+    save_every: 1               # also writes last_<save_name> every N epochs
+    resume_checkpoint: null     # path to a previously saved best/last ckpt; overridden by --resume
+    max_train_samples: null     # set to small int (e.g. 16) for quick smoke test
+    max_val_samples: null
+
+    save_dir: ${COMPONENT4_SAVE_DIR:-checkpoints/component4}
+    save_name: component4_mask_decoder.pt
+
+  data:
+    train_manifest: ${COMPONENT4_TRAIN_MANIFEST:-data/splits/component4_manifest.csv}
+    val_manifest:   ${COMPONENT4_VAL_MANIFEST:-data/splits/component4_manifest.csv}
+    apply_clahe: null           # null -> honor Component 0 per-dataset defaults (Montgomery/Shenzhen = true)

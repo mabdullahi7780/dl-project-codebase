@@ -1,0 +1,5 @@
+component7_fp_auditor:
+  status: placeholder
+  notes:
+    - reserved for the Component 7 false-positive auditor training scaffold
+    - intentionally not implemented in this pass

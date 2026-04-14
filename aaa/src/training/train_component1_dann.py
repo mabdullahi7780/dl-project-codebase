@@ -1,0 +1,923 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import os
+import re
+import tarfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+import yaml
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
+
+from src.components.component0_qc import canonicalise_dataset_id
+from src.components.component1_dann import (
+    Component1DANNModel,
+    DANNHead,
+    DANNHeadConfig,
+    compute_dann_lambda,
+    domain_classification_loss,
+)
+from src.components.component1_encoder import (
+    Component1EncoderConfig,
+    LoRAConfig,
+    build_component1_encoder,
+    extract_trainable_state_dict,
+    save_trainable_state_dict,
+)
+from src.core.device import pick_device
+from src.core.seed import seed_everything
+from src.data.harmonise import harmonise_sample
+
+
+DOMAIN_TO_ID: dict[str, int] = {
+    "montgomery": 0,
+    "shenzhen": 1,
+    "tbx11k": 2,
+    "nih_cxr14": 3,
+}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+ARCHIVE_SUFFIXES = {".tar", ".tar.gz", ".tgz", ".zip"}
+ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-([^}]+))?\}")
+
+# Directory-name fragments that never contain CXR images and should be
+# excluded from Montgomery / Shenzhen / TBX discovery (case-insensitive).
+_MASK_DIR_TOKENS = ("mask", "manualmask", "leftmask", "rightmask", "segmentation", "segmask")
+
+# Preferred image subdirectories by dataset (searched in order); if none
+# exist we fall back to a filtered recursive walk.
+_PREFERRED_IMAGE_SUBDIRS: dict[str, tuple[str, ...]] = {
+    "montgomery": (
+        "MontgomerySet/CXR_png",
+        "CXR_png",
+        "images",
+    ),
+    "shenzhen": (
+        "ChinaSet_AllFiles/CXR_png",
+        "CXR_png",
+        "images",
+    ),
+}
+
+# NIH metadata CSV filenames as distributed across Kaggle / NIH mirrors.
+_NIH_METADATA_CANDIDATES: tuple[str, ...] = (
+    "Data_Entry_2017_v2020.csv",
+    "Data_Entry_2017.csv",
+)
+
+
+@dataclass(slots=True)
+class DomainSampleRef:
+    dataset_id: str
+    domain_id: int
+    source: str
+    image_path: str | None = None
+    archive_path: str | None = None
+    member_name: str | None = None
+
+
+def apply_domain_adaptation_augment(
+    x_3ch: torch.Tensor,
+    *,
+    gamma_range: tuple[float, float] = (0.7, 1.4),
+    poisson_peaks: tuple[float, ...] = (32.0, 64.0, 128.0),
+) -> torch.Tensor:
+    """Apply the slide-specified gamma jitter + Poisson noise to grayscale triplets."""
+
+    if x_3ch.shape[0] != 3:
+        raise ValueError(f"Expected 3-channel tensor, got {tuple(x_3ch.shape)}.")
+
+    single = x_3ch[:1].clamp(0.0, 1.0)
+    gamma = float(torch.empty(1).uniform_(gamma_range[0], gamma_range[1]).item())
+    peak_idx = int(torch.randint(len(poisson_peaks), (1,)).item())
+    peak = float(poisson_peaks[peak_idx])
+
+    gamma_adjusted = single.pow(gamma)
+    noisy = torch.poisson((gamma_adjusted * peak).clamp_min(0.0)) / peak
+    return noisy.clamp(0.0, 1.0).repeat(3, 1, 1)
+
+
+class Component1DomainDataset(Dataset[dict[str, Any]]):
+    def __init__(
+        self,
+        samples: list[DomainSampleRef],
+        *,
+        apply_augmentation: bool = False,
+        augmentation_datasets: tuple[str, ...] = ("montgomery", "shenzhen"),
+        gamma_range: tuple[float, float] = (0.7, 1.4),
+        poisson_peaks: tuple[float, ...] = (32.0, 64.0, 128.0),
+    ) -> None:
+        self.samples = samples
+        self._tar_cache: dict[str, tarfile.TarFile] = {}
+        self._zip_cache: dict[str, Any] = {}
+        self.apply_augmentation = apply_augmentation
+        self.augmentation_datasets = augmentation_datasets
+        self.gamma_range = gamma_range
+        self.poisson_peaks = poisson_peaks
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        sample = self.samples[index]
+        image = self._load_image(sample)
+        harmonised = harmonise_sample(
+            {
+                "image": image,
+                "dataset_id": sample.dataset_id,
+                "source": sample.source,
+            }
+        )
+        x_3ch = harmonised.x_3ch
+        if self.apply_augmentation and sample.dataset_id in self.augmentation_datasets:
+            x_3ch = apply_domain_adaptation_augment(
+                x_3ch,
+                gamma_range=self.gamma_range,
+                poisson_peaks=self.poisson_peaks,
+            )
+        return {
+            "x_3ch": x_3ch,
+            "domain_id": torch.tensor(sample.domain_id, dtype=torch.long),
+            "dataset_id": sample.dataset_id,
+            "source": sample.source,
+        }
+
+    def _load_image(self, sample: DomainSampleRef) -> np.ndarray:
+        if sample.image_path is not None:
+            return _read_image_file(Path(sample.image_path))
+
+        if sample.archive_path is None or sample.member_name is None:
+            raise ValueError(f"Incomplete sample reference: {sample!r}")
+
+        archive_path = sample.archive_path
+        lowered = archive_path.lower()
+        if lowered.endswith(".zip"):
+            import zipfile
+
+            archive = self._zip_cache.get(archive_path)
+            if archive is None:
+                archive = zipfile.ZipFile(archive_path, mode="r")
+                self._zip_cache[archive_path] = archive
+            with archive.open(sample.member_name) as member:
+                with Image.open(io.BytesIO(member.read())) as image:
+                    return np.asarray(image.convert("L"))
+
+        mode = "r:gz" if lowered.endswith((".tar.gz", ".tgz")) else "r:"
+        archive = self._tar_cache.get(archive_path)
+        if archive is None:
+            archive = tarfile.open(archive_path, mode=mode)
+            self._tar_cache[archive_path] = archive
+
+        member = archive.extractfile(sample.member_name)
+        if member is None:
+            raise FileNotFoundError(f"Missing tar member {sample.member_name!r} in {archive_path}.")
+        with member:
+            with Image.open(io.BytesIO(member.read())) as image:
+                return np.asarray(image.convert("L"))
+
+
+def collate_component1_batch(batch: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "x_3ch": torch.stack([item["x_3ch"] for item in batch], dim=0),
+        "domain_id": torch.stack([item["domain_id"] for item in batch], dim=0),
+        "dataset_id": [item["dataset_id"] for item in batch],
+        "source": [item["source"] for item in batch],
+    }
+
+
+def _read_image_file(path: Path) -> np.ndarray:
+    with Image.open(path) as image:
+        return np.asarray(image.convert("L"))
+
+
+def _resolve_env_vars(value: Any) -> Any:
+    if isinstance(value, str):
+        def repl(match: re.Match[str]) -> str:
+            key = match.group(1)
+            default = match.group(2) or ""
+            return os.environ.get(key, default)
+
+        return ENV_PATTERN.sub(repl, value)
+    if isinstance(value, dict):
+        return {key: _resolve_env_vars(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_vars(inner) for inner in value]
+    return value
+
+
+def load_yaml_config(path: str | Path) -> dict[str, Any]:
+    with Path(path).open("r", encoding="utf-8") as handle:
+        return _resolve_env_vars(yaml.safe_load(handle))
+
+
+def _path_has_mask_token(path: Path, root: Path) -> bool:
+    """True if any path component between ``root`` and ``path`` is a mask folder."""
+
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        rel = path
+    for part in rel.parts[:-1]:  # exclude the filename itself
+        lowered = part.lower()
+        if any(token in lowered for token in _MASK_DIR_TOKENS):
+            return True
+    return False
+
+
+def _iter_image_paths(root: Path, *, exclude_mask_dirs: bool = True) -> list[Path]:
+    if not root.exists():
+        return []
+
+    paths: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name.startswith("._"):
+            continue
+        if path.suffix.lower() not in IMAGE_SUFFIXES:
+            continue
+        if exclude_mask_dirs and _path_has_mask_token(path, root):
+            continue
+        paths.append(path)
+    return paths
+
+
+def _resolve_image_root(dataset_id: str, root: Path) -> Path:
+    """Pick the best image subdirectory for Montgomery/Shenzhen.
+
+    Montgomery and Shenzhen ship with mask folders alongside CXRs; if the
+    canonical ``CXR_png`` subdir is present we descend into it so that even
+    an unfiltered glob cannot pick up masks.
+    """
+
+    preferred = _PREFERRED_IMAGE_SUBDIRS.get(dataset_id, ())
+    for sub in preferred:
+        candidate = root / sub
+        if candidate.exists():
+            return candidate
+    return root
+
+
+def _build_generic_image_samples(dataset_id: str, root: Path) -> list[DomainSampleRef]:
+    canonical = canonicalise_dataset_id(dataset_id)
+    image_root = _resolve_image_root(canonical, root)
+    return [
+        DomainSampleRef(
+            dataset_id=canonical,
+            domain_id=DOMAIN_TO_ID[canonical],
+            source=str(path),
+            image_path=str(path),
+        )
+        for path in _iter_image_paths(image_root, exclude_mask_dirs=True)
+    ]
+
+
+def _load_lines(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8") as handle:
+        return [line.strip() for line in handle if line.strip()]
+
+
+def _load_nih_metadata_image_ids(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if "Image Index" not in (reader.fieldnames or []):
+            raise ValueError(f"Expected `Image Index` column in NIH metadata CSV: {path}")
+        return [row["Image Index"].strip() for row in reader if row.get("Image Index")]
+
+
+def _build_tbx11k_samples(root: Path, list_name: str) -> list[DomainSampleRef]:
+    list_path = root / "lists" / list_name
+    if list_path.exists():
+        rel_paths = _load_lines(list_path)
+        samples: list[DomainSampleRef] = []
+        for rel in rel_paths:
+            image_path = root / "imgs" / rel
+            if not image_path.exists():
+                continue
+            samples.append(
+                DomainSampleRef(
+                    dataset_id="tbx11k",
+                    domain_id=DOMAIN_TO_ID["tbx11k"],
+                    source=rel,
+                    image_path=str(image_path),
+                )
+            )
+        if samples:
+            return samples
+    return _build_generic_image_samples("tbx11k", root / "imgs")
+
+
+def _normalise_nih_cache(payload: dict[str, Any]) -> dict[str, dict[str, str]]:
+    normalised: dict[str, dict[str, str]] = {}
+    for image_name, value in payload.items():
+        if isinstance(value, str):
+            normalised[image_name] = {
+                "archive_path": value,
+                "member_name": image_name,
+            }
+        else:
+            normalised[image_name] = {
+                "archive_path": str(value["archive_path"]),
+                "member_name": str(value["member_name"]),
+            }
+    return normalised
+
+
+def _iter_nih_extracted_images(search_roots: list[Path]) -> dict[str, str]:
+    """Walk pre-extracted NIH image folders and index them by basename.
+
+    Supports both the Kaggle public layout (``images_001/images/*.png`` …
+    ``images_012/images/*.png``) and a flat ``images/*.png`` layout.
+    """
+
+    index: dict[str, str] = {}
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.startswith("._"):
+                continue
+            if path.suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            # First occurrence wins so the index is deterministic.
+            index.setdefault(path.name, str(path))
+    return index
+
+
+def _iter_nih_archives(search_roots: list[Path]) -> list[Path]:
+    archives: list[Path] = []
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.iterdir()):
+            if not path.is_file():
+                continue
+            name = path.name.lower()
+            if name.endswith(".tar.gz") or name.endswith(".tgz"):
+                archives.append(path)
+            elif name.endswith(".tar") or name.endswith(".zip"):
+                archives.append(path)
+    return archives
+
+
+def _index_tar_archive(archive_path: Path) -> dict[str, dict[str, str]]:
+    mode = "r:gz" if archive_path.name.lower().endswith((".tar.gz", ".tgz")) else "r:"
+    out: dict[str, dict[str, str]] = {}
+    with tarfile.open(archive_path, mode=mode) as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            member_name = Path(member.name).name
+            if member_name.startswith("._"):
+                continue
+            if Path(member_name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            out[member_name] = {
+                "archive_path": str(archive_path),
+                "member_name": member.name,
+            }
+    return out
+
+
+def _index_zip_archive(archive_path: Path) -> dict[str, dict[str, str]]:
+    import zipfile
+
+    out: dict[str, dict[str, str]] = {}
+    with zipfile.ZipFile(archive_path, mode="r") as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            member_name = Path(info.filename).name
+            if member_name.startswith("._"):
+                continue
+            if Path(member_name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            out[member_name] = {
+                "archive_path": str(archive_path),
+                "member_name": info.filename,
+            }
+    return out
+
+
+def _build_nih_archive_index(images_root: Path, cache_path: Path | None = None) -> dict[str, dict[str, str]]:
+    """Discover NIH images across tar.gz / tar / zip / pre-extracted layouts.
+
+    The Kaggle public dump keeps images as ``images_NNN/images/*.png`` with
+    no archive at all; the original NIH box distributed 12 tar.gz shards;
+    some mirrors ship a single zip. All three are handled.
+    """
+
+    if cache_path is not None and cache_path.exists():
+        with cache_path.open("r", encoding="utf-8") as handle:
+            return _normalise_nih_cache(json.load(handle))
+
+    # Candidate roots to search. ``images_root`` is typically ``root/images``
+    # but the Kaggle layout keeps the numbered shards directly under
+    # ``root/``. Include the parent to cover both.
+    search_roots: list[Path] = [images_root]
+    if images_root.parent != images_root:
+        search_roots.append(images_root.parent)
+
+    archive_index: dict[str, dict[str, str]] = {}
+
+    # 1. Pre-extracted layouts (Kaggle, or already-unpacked NIH dumps).
+    for basename, path in _iter_nih_extracted_images(search_roots).items():
+        archive_index[basename] = {
+            "archive_path": "",
+            "member_name": path,
+        }
+
+    # 2. Archive layouts (tar.gz / tar / zip). Pre-extracted entries take
+    # precedence so we don't overwrite a usable file path with an archive
+    # reference.
+    for archive_path in _iter_nih_archives(search_roots):
+        name = archive_path.name.lower()
+        try:
+            if name.endswith(".zip"):
+                new_entries = _index_zip_archive(archive_path)
+            else:
+                new_entries = _index_tar_archive(archive_path)
+        except (tarfile.TarError, OSError) as exc:
+            print(f"WARNING: failed to index NIH archive {archive_path}: {exc}")
+            continue
+        for basename, entry in new_entries.items():
+            archive_index.setdefault(basename, entry)
+
+    if cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with cache_path.open("w", encoding="utf-8") as handle:
+            json.dump(archive_index, handle, indent=2, sort_keys=True)
+    return archive_index
+
+
+def _resolve_nih_metadata_csv(root: Path, metadata_csv: str | None) -> Path:
+    """Try a sequence of NIH metadata CSV filenames.
+
+    ``metadata_csv`` (from config) is tried first if provided, then the
+    canonical candidates in ``_NIH_METADATA_CANDIDATES``. Raises a helpful
+    error if none are found.
+    """
+
+    tried: list[Path] = []
+    candidates: list[str] = []
+    if metadata_csv:
+        candidates.append(metadata_csv)
+    for name in _NIH_METADATA_CANDIDATES:
+        if name not in candidates:
+            candidates.append(name)
+    for name in candidates:
+        candidate_path = root / name
+        tried.append(candidate_path)
+        if candidate_path.is_file():
+            return candidate_path
+    raise FileNotFoundError(
+        "Could not locate an NIH metadata CSV. Tried: "
+        + ", ".join(str(path) for path in tried)
+    )
+
+
+def _build_nih_samples(
+    root: Path,
+    split_name: str | None,
+    *,
+    cache_path: Path | None = None,
+    metadata_csv: str | None = None,
+) -> list[DomainSampleRef]:
+    archive_index = _build_nih_archive_index(root / "images", cache_path=cache_path)
+    if split_name:
+        split_path = root / split_name
+        if not split_path.exists():
+            raise FileNotFoundError(f"Expected NIH split file at {split_path}.")
+        image_names = _load_lines(split_path)
+    else:
+        metadata_path = _resolve_nih_metadata_csv(root, metadata_csv)
+        image_names = _load_nih_metadata_image_ids(metadata_path)
+
+    samples: list[DomainSampleRef] = []
+    for image_name in image_names:
+        archive_ref = archive_index.get(image_name)
+        if archive_ref is None:
+            continue
+        archive_path_str = archive_ref.get("archive_path", "")
+        member_name = archive_ref.get("member_name", "")
+        # Pre-extracted files: ``archive_path`` is empty and ``member_name``
+        # holds the on-disk absolute path. Archive members: both fields set.
+        if not archive_path_str and member_name and Path(member_name).is_file():
+            samples.append(
+                DomainSampleRef(
+                    dataset_id="nih_cxr14",
+                    domain_id=DOMAIN_TO_ID["nih_cxr14"],
+                    source=image_name,
+                    image_path=member_name,
+                )
+            )
+        else:
+            samples.append(
+                DomainSampleRef(
+                    dataset_id="nih_cxr14",
+                    domain_id=DOMAIN_TO_ID["nih_cxr14"],
+                    source=image_name,
+                    archive_path=archive_path_str,
+                    member_name=member_name,
+                )
+            )
+    return samples
+
+
+def build_component1_manifest(
+    *,
+    paths_config: str | Path = "configs/paths.yaml",
+    component1_config: str | Path = "configs/component1_dann.yaml",
+) -> list[DomainSampleRef]:
+    paths_yaml = load_yaml_config(paths_config)
+    component1_yaml = load_yaml_config(component1_config)["component1_dann"]
+    dataset_roots = paths_yaml["datasets"]
+    cache_path = Path(component1_yaml["data"]["manifest_cache"])
+    tbx_list = component1_yaml["data"]["tbx_list"]
+    nih_split = component1_yaml["data"].get("nih_split")
+    nih_metadata_csv = component1_yaml["data"].get("nih_metadata_csv")
+
+    samples: list[DomainSampleRef] = []
+    samples.extend(_build_generic_image_samples("montgomery", Path(dataset_roots["montgomery"])))
+    samples.extend(_build_generic_image_samples("shenzhen", Path(dataset_roots["shenzhen"])))
+    samples.extend(_build_tbx11k_samples(Path(dataset_roots["tbx11k"]), tbx_list))
+
+    nih_root = Path(dataset_roots["nih_cxr14"])
+    if nih_root.exists():
+        samples.extend(
+            _build_nih_samples(
+                nih_root,
+                nih_split,
+                cache_path=cache_path,
+                metadata_csv=nih_metadata_csv,
+            )
+        )
+    else:
+        print(f"INFO: NIH CXR14 root not found at {nih_root} — skipping (sampling weight=1.0).")
+
+    return samples
+
+
+def maybe_limit_manifest(samples: list[DomainSampleRef], limit_per_domain: int | None) -> list[DomainSampleRef]:
+    if limit_per_domain is None:
+        return samples
+
+    grouped: dict[str, list[DomainSampleRef]] = {dataset_id: [] for dataset_id in DOMAIN_TO_ID}
+    for sample in samples:
+        grouped[sample.dataset_id].append(sample)
+
+    limited: list[DomainSampleRef] = []
+    for dataset_id, group in grouped.items():
+        limited.extend(group[:limit_per_domain])
+    return limited
+
+
+def build_weighted_sampler(
+    samples: list[DomainSampleRef],
+    domain_weights: dict[str, float],
+) -> WeightedRandomSampler:
+    weights = [
+        float(domain_weights.get(sample.dataset_id, 1.0))
+        for sample in samples
+    ]
+    return WeightedRandomSampler(
+        weights=torch.tensor(weights, dtype=torch.double),
+        num_samples=len(samples),
+        replacement=True,
+    )
+
+
+def build_model(config: dict[str, Any]) -> Component1DANNModel:
+    encoder_cfg = config["encoder"]
+    lora_cfg = config["lora"]
+    dann_cfg = config["dann_head"]
+
+    encoder = build_component1_encoder(
+        Component1EncoderConfig(
+            backend=str(encoder_cfg["backend"]),
+            checkpoint_path=encoder_cfg.get("checkpoint_path"),
+            freeze_backbone=bool(encoder_cfg["freeze_backbone"]),
+            input_size=int(encoder_cfg["input_size"]),
+            patch_size=int(encoder_cfg["patch_size"]),
+            embed_dim=int(encoder_cfg["embed_dim"]),
+            depth=int(encoder_cfg["depth"]),
+            num_heads=int(encoder_cfg["num_heads"]),
+            mlp_ratio=float(encoder_cfg["mlp_ratio"]),
+            lora=LoRAConfig(
+                rank=int(lora_cfg["rank"]),
+                alpha=float(lora_cfg["alpha"]),
+                dropout=float(lora_cfg["dropout"]),
+                target_modules=tuple(lora_cfg["target_modules"]),
+            ),
+        )
+    )
+    head = DANNHead(
+        DANNHeadConfig(
+            input_dim=int(dann_cfg["input_dim"]),
+            hidden_dim=int(dann_cfg["hidden_dim"]),
+            num_domains=int(dann_cfg["num_domains"]),
+            dropout=float(dann_cfg["dropout"]),
+        )
+    )
+    return Component1DANNModel(encoder=encoder, head=head)
+
+
+def build_optimizer(model: Component1DANNModel, config: dict[str, Any]) -> torch.optim.Optimizer:
+    train_cfg = config["training"]
+    lora_params = []
+    head_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "encoder" in name:
+            lora_params.append(param)
+        else:
+            head_params.append(param)
+
+    return torch.optim.AdamW(
+        [
+            {"params": lora_params, "lr": float(train_cfg["lr_lora"])},
+            {"params": head_params, "lr": float(train_cfg["lr_dann"])},
+        ],
+        weight_decay=float(train_cfg["weight_decay"]),
+    )
+
+
+def train_one_epoch(
+    model: Component1DANNModel,
+    loader: DataLoader[dict[str, Any]],
+    optimizer: torch.optim.Optimizer,
+    *,
+    epoch: int,
+    device: torch.device,
+    ramp_epochs: int,
+    max_lambda: float,
+    amp_enabled: bool = False,
+    scaler: "torch.amp.GradScaler | None" = None,
+) -> dict[str, float]:
+    from tqdm.auto import tqdm
+
+    model.train()
+    running_loss = 0.0
+    running_correct = 0
+    running_items = 0
+    lambda_ = compute_dann_lambda(epoch, ramp_epochs=ramp_epochs, max_lambda=max_lambda)
+
+    progress = tqdm(loader, desc=f"epoch {epoch}", leave=False, dynamic_ncols=True)
+    for batch in progress:
+        x_3ch = batch["x_3ch"].to(device)
+        domain_targets = batch["domain_id"].to(device)
+
+        optimizer.zero_grad(set_to_none=True)
+        if amp_enabled:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                _, dom_logits = model(x_3ch, lambda_=lambda_)
+                loss = domain_classification_loss(dom_logits, domain_targets)
+            assert scaler is not None
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            _, dom_logits = model(x_3ch, lambda_=lambda_)
+            loss = domain_classification_loss(dom_logits, domain_targets)
+            loss.backward()
+            optimizer.step()
+
+        running_loss += float(loss.item()) * int(domain_targets.shape[0])
+        predictions = dom_logits.argmax(dim=1)
+        running_correct += int((predictions == domain_targets).sum().item())
+        running_items += int(domain_targets.shape[0])
+        progress.set_postfix(
+            loss=f"{running_loss / max(running_items, 1):.4f}",
+            acc=f"{running_correct / max(running_items, 1):.3f}",
+            lam=f"{lambda_:.2f}",
+        )
+
+    average_loss = running_loss / max(running_items, 1)
+    accuracy = running_correct / max(running_items, 1)
+    return {"loss": average_loss, "accuracy": accuracy, "lambda": lambda_}
+
+
+def save_last_snapshot(
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    *,
+    epoch: int,
+    metrics: dict[str, float],
+    config: dict[str, Any],
+    save_dir: Path,
+    scaler: "torch.amp.GradScaler | None" = None,
+) -> Path:
+    """Write a resume-friendly snapshot after each epoch.
+
+    Kaggle sessions can die without warning; this lets ``--resume`` pick up
+    from the start of the next epoch without re-running completed ones.
+    """
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "trainable_state_dict": extract_trainable_state_dict(model),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "epoch": int(epoch),
+        "metrics": metrics,
+        "config": config,
+    }
+    if scaler is not None:
+        payload["scaler_state_dict"] = scaler.state_dict()
+    snapshot_path = save_dir / "last_component1_snapshot.pt"
+    torch.save(payload, snapshot_path)
+    return snapshot_path
+
+
+def maybe_resume_component1(
+    resume_path: str | Path | None,
+    *,
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    scaler: "torch.amp.GradScaler | None" = None,
+) -> int:
+    """Restore trainable params + optimizer state from a snapshot. Returns next epoch."""
+
+    if not resume_path:
+        return 0
+    snapshot = Path(resume_path).expanduser()
+    if not snapshot.is_file():
+        raise FileNotFoundError(f"Resume snapshot not found: {snapshot}")
+    payload = torch.load(snapshot, map_location=device, weights_only=False)
+
+    state_dict = payload.get("trainable_state_dict")
+    if state_dict is None:
+        raise ValueError(
+            f"Snapshot {snapshot} has no `trainable_state_dict` (wrong format?)."
+        )
+    missing = model.load_state_dict(state_dict, strict=False)
+    if missing.unexpected_keys:
+        raise ValueError(
+            f"Unexpected keys in resume snapshot {snapshot}: {missing.unexpected_keys[:5]}"
+        )
+    if "optimizer_state_dict" in payload:
+        optimizer.load_state_dict(payload["optimizer_state_dict"])
+    if scaler is not None and "scaler_state_dict" in payload:
+        scaler.load_state_dict(payload["scaler_state_dict"])
+    start_epoch = int(payload.get("epoch", -1)) + 1
+    print(f"Resumed from {snapshot} at epoch {start_epoch}")
+    return start_epoch
+
+
+def save_checkpoint(
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    metrics: dict[str, float],
+    config: dict[str, Any],
+    save_path: Path,
+) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "metrics": metrics,
+            "config": config,
+        },
+        save_path,
+    )
+
+
+def save_component1_artifacts(
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    metrics: dict[str, float],
+    config: dict[str, Any],
+) -> Path:
+    save_dir = Path(config["training"]["save_dir"])
+    adapter_name = str(config["training"].get("adapter_save_name", "component1_adapters.safetensors"))
+    adapter_path = save_trainable_state_dict(model, save_dir / adapter_name)
+
+    if config["training"].get("save_full_checkpoint", False):
+        save_name = str(config["training"]["save_name"])
+        save_checkpoint(model, optimizer, metrics, config, save_dir / save_name)
+
+    return adapter_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train Component 1 DANN on the 4-domain CXR mix.")
+    parser.add_argument("--config", default="configs/component1_dann.yaml")
+    parser.add_argument("--paths", default="configs/paths.yaml")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to last_component1_snapshot.pt (overrides config.training.resume_checkpoint).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    config = load_yaml_config(args.config)["component1_dann"]
+    seed_everything(int(config["training"]["seed"]))
+
+    samples = build_component1_manifest(paths_config=args.paths, component1_config=args.config)
+    samples = maybe_limit_manifest(samples, config["training"].get("limit_per_domain"))
+    if not samples:
+        raise RuntimeError("Component 1 manifest is empty. Check HDD dataset paths in configs/paths.yaml.")
+
+    if args.dry_run:
+        counts = {
+            dataset_id: sum(1 for sample in samples if sample.dataset_id == dataset_id)
+            for dataset_id in DOMAIN_TO_ID
+        }
+        print(json.dumps({"counts": counts, "total": len(samples)}, indent=2))
+        return
+
+    device = pick_device(config["training"].get("device"))
+    model = build_model(config).to(device)
+    optimizer = build_optimizer(model, config)
+    sampler = build_weighted_sampler(samples, config["data"]["domain_sampling_weights"])
+    loader = DataLoader(
+        Component1DomainDataset(
+            samples,
+            apply_augmentation=bool(config["data"].get("apply_augmentation", True)),
+            augmentation_datasets=tuple(config["data"].get("augmentation_datasets", ["montgomery", "shenzhen"])),
+            gamma_range=tuple(config["data"].get("gamma_range", [0.7, 1.4])),
+            poisson_peaks=tuple(config["data"].get("poisson_peaks", [32.0, 64.0, 128.0])),
+        ),
+        batch_size=int(config["training"]["batch_size"]),
+        sampler=sampler,
+        num_workers=int(config["training"]["num_workers"]),
+        collate_fn=collate_component1_batch,
+    )
+
+    amp_requested = bool(config["training"].get("amp", False))
+    amp_enabled = amp_requested and device.type == "cuda"
+    if amp_requested and not amp_enabled:
+        print(f"AMP requested but device is {device.type}; AMP disabled.")
+    scaler = torch.amp.GradScaler("cuda") if amp_enabled else None
+
+    resume_path = args.resume or config["training"].get("resume_checkpoint")
+    start_epoch = maybe_resume_component1(
+        resume_path,
+        model=model,
+        optimizer=optimizer,
+        device=device,
+        scaler=scaler,
+    )
+
+    save_dir = Path(config["training"]["save_dir"])
+    save_every = int(config["training"].get("save_every", 1))
+    history_path = save_dir / "component1_training_history.jsonl"
+
+    epochs = int(config["training"]["epochs"])
+    metrics: dict[str, float] = {}
+    for epoch in range(start_epoch, epochs):
+        metrics = train_one_epoch(
+            model,
+            loader,
+            optimizer,
+            epoch=epoch,
+            device=device,
+            ramp_epochs=int(config["training"]["grl_ramp_epochs"]),
+            max_lambda=float(config["training"]["max_lambda"]),
+            amp_enabled=amp_enabled,
+            scaler=scaler,
+        )
+        print(
+            f"epoch={epoch + 1}/{epochs} "
+            f"loss={metrics['loss']:.4f} "
+            f"acc={metrics['accuracy']:.4f} "
+            f"lambda={metrics['lambda']:.4f}"
+        )
+
+        save_dir.mkdir(parents=True, exist_ok=True)
+        with history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"epoch": epoch, **metrics}) + "\n")
+
+        if save_every and ((epoch - start_epoch + 1) % save_every == 0):
+            snapshot = save_last_snapshot(
+                model,
+                optimizer,
+                epoch=epoch,
+                metrics=metrics,
+                config=config,
+                save_dir=save_dir,
+                scaler=scaler,
+            )
+            print(f"  -> snapshot: {snapshot}")
+
+    adapter_path = save_component1_artifacts(model, optimizer, metrics, config)
+    print(f"saved trainable adapters to {adapter_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,56 @@
+component0:
+  min_resolution_px: 512
+  aspect_ratio_range: [0.7, 1.4]
+  x1024_size: 1024
+  x224_size: 224
+  clahe:
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+    default_by_dataset:
+      montgomery: true
+      shenzhen: true
+      tbx11k: false
+      nih_cxr14: false
+
+runtime:
+  device: null
+
+component1:
+  backend: auto
+  # Component 1 shares the MedSAM ViT-B backbone with Component 4; it is the
+  # same weight-compatible image encoder checkpoint, just loaded by a
+  # different wrapper.
+  checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+  # Optional: LoRA + DANN-head adapters from train_component1_dann.py
+  # (.safetensors or .pt). Loaded on top of the MedSAM ViT-B backbone.
+  adapter_path: null
+
+component2:
+  backend: auto
+  weights: densenet121-res224-all
+  pathology_flag_threshold: 0.6
+
+component4:
+  backend: auto
+  checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+  model_type: vit_b
+  mask_threshold: 0.5
+  # Optional: path to a fine-tuned mask decoder (from train_component4_lung.py).
+  # If set, this is loaded on top of the MedSAM backbone at inference time.
+  decoder_checkpoint_path: checkpoints/component4/component4_mask_decoder.pt
+
+baseline_lesion_proposer:
+  suspicious_class_threshold: 0.55
+  fixed_binary_threshold: null
+  min_region_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  fallback_blend: 0.35
+
+component7_refine:
+  min_area_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  weak_boundary_threshold: 0.45
+  suppress_fp_threshold: 0.85
+  caution_fp_threshold: 0.65

@@ -1,0 +1,60 @@
+component1_dann:
+  encoder:
+    backend: auto
+    # Component 1 now uses MedSAM ViT-B (same neck contract as SAM ViT-B):
+    # small enough to fit a Kaggle T4, same [B,256,64,64] embedding.
+    checkpoint_path: ${MEDSAM_VIT_B_CKPT:-checkpoints/medsam/medsam_vit_b.pth}
+    freeze_backbone: true
+    input_size: 1024
+    patch_size: 16
+    embed_dim: 256
+    depth: 2
+    num_heads: 8
+    mlp_ratio: 4.0
+
+  lora:
+    rank: 4
+    alpha: 16.0
+    dropout: 0.05
+    target_modules: ["qkv"]
+
+  dann_head:
+    input_dim: 256
+    hidden_dim: 128
+    num_domains: 4
+    dropout: 0.3
+
+  training:
+    seed: 1337
+    device: null
+    epochs: 20
+    batch_size: 4
+    num_workers: 0
+    grl_ramp_epochs: 10
+    max_lambda: 1.0
+    lr_lora: 1.0e-4
+    lr_dann: 1.0e-3
+    weight_decay: 1.0e-4
+    limit_per_domain: null
+    amp: true                   # fp16 autocast on CUDA only; silently off on MPS/CPU
+    save_every: 1               # epochs between last_* snapshots (for Kaggle session kills)
+    resume_checkpoint: null     # path to last_* checkpoint; overridden by --resume
+    save_dir: ${COMPONENT1_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component1}
+    save_name: component1_dann_full.pt
+    adapter_save_name: lora_adapters.safetensors
+    save_full_checkpoint: false
+
+  data:
+    manifest_cache: ${COMPONENT1_MANIFEST_CACHE:-/Volumes/Toshiba HDR/TB_DATA/derived/nih_cxr14_tar_index.json}
+    tbx_list: all_trainval.txt
+    nih_split: null
+    nih_metadata_csv: Data_Entry_2017_v2020.csv
+    domain_sampling_weights:
+      montgomery: 100.0
+      shenzhen: 20.0
+      tbx11k: 2.0
+      nih_cxr14: 1.0
+    apply_augmentation: true
+    augmentation_datasets: ["montgomery", "shenzhen"]
+    gamma_range: [0.7, 1.4]
+    poisson_peaks: [32.0, 64.0, 128.0]
