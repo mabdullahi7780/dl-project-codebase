@@ -75,6 +75,40 @@ def freeze_module(module: nn.Module) -> None:
         param.requires_grad = False
 
 
+class _CheckpointedBlock(nn.Module):
+    """Activation-checkpointing wrapper around a SAM image-encoder block.
+
+    Frozen-backbone + LoRA training still pays the full activation memory
+    of every attention block, because LoRA is injected *inside* ``attn.qkv``
+    and backward must traverse the block. Wrapping each block with
+    ``torch.utils.checkpoint`` trades ~20% compute for ~4-6 GB of peak GPU
+    memory and is what makes batch_size >= 2 feasible on a T4.
+    """
+
+    def __init__(self, block: nn.Module) -> None:
+        super().__init__()
+        self.block = block
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.training and torch.is_grad_enabled():
+            import torch.utils.checkpoint as cp
+
+            return cp.checkpoint(self.block, x, use_reentrant=False)
+        return self.block(x)
+
+
+def enable_encoder_gradient_checkpointing(image_encoder: nn.Module) -> int:
+    """Wrap every transformer block in a SAM ``ImageEncoderViT`` with
+    activation checkpointing. Returns the number of wrapped blocks (0 if
+    the module has no ``blocks`` attribute, e.g. the mock backbone)."""
+
+    blocks = getattr(image_encoder, "blocks", None)
+    if blocks is None or not isinstance(blocks, nn.ModuleList):
+        return 0
+    image_encoder.blocks = nn.ModuleList(_CheckpointedBlock(b) for b in blocks)
+    return len(image_encoder.blocks)
+
+
 def _module_matches(name: str, target_modules: Iterable[str]) -> bool:
     return any(target in name for target in target_modules)
 
@@ -229,6 +263,12 @@ class MedSAMViTBEncoder(nn.Module):
         if checkpoint_path is not None:
             load_checkpoint_into_module(sam, checkpoint_path)
         self.image_encoder = sam.image_encoder
+        # Enable activation checkpointing so backward through the (frozen
+        # backbone + LoRA) fits in a T4's 16 GB at batch_size >= 2. Must be
+        # done before LoRA injection walks the module tree — the wrapper
+        # forwards named_children through to the original block, so LoRA
+        # still finds and replaces ``attn.qkv`` correctly.
+        enable_encoder_gradient_checkpointing(self.image_encoder)
         self.register_buffer(
             "pixel_mean",
             torch.tensor([123.675, 116.28, 103.53], dtype=torch.float32).view(1, 3, 1, 1) / 255.0,

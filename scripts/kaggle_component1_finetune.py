@@ -63,23 +63,25 @@ MEDSAM_CKPT_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/medsam-vit-b/medsam_vit_
 
 MODE_PRESETS: dict[str, dict[str, object]] = {
     # Fast sanity check: a handful of images per domain, 1 epoch.
+    # bs=1 so smoke succeeds even if gradient checkpointing is disabled.
     "smoke": {
         "epochs": 1,
-        "batch_size": 2,
+        "batch_size": 1,
         "num_workers": 2,
         "limit_per_domain": 8,
     },
-    # Real but short: check GPU + losses behave. ~20 min on T4.
+    # Real but short: check GPU + losses behave. ~20-30 min on T4.
     "short": {
         "epochs": 2,
-        "batch_size": 2,
+        "batch_size": 1,
         "num_workers": 2,
         "limit_per_domain": 200,
     },
-    # Full fine-tune. Keep batch_size=4 on a T4; drop to 2 if OOM.
+    # Full fine-tune. MedSAM ViT-B at 1024^2 with activation checkpointing
+    # fits bs=2 on a T4 16 GB. Drop to 1 if OOM; raise to 4 only on A100.
     "full": {
         "epochs": 8,
-        "batch_size": 4,
+        "batch_size": 2,
         "num_workers": 2,
         "limit_per_domain": None,
     },
@@ -251,6 +253,12 @@ def main() -> None:
     args = parse_args()
     preset = MODE_PRESETS[args.mode]
 
+    # Reduce CUDA fragmentation on T4 so the LoRA-through-frozen-backbone
+    # backward pass has room to work. Must be set before any torch import
+    # that initializes CUDA — setting it here, before the trainer import,
+    # is early enough.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
     repo_root = _find_repo_root()
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
@@ -269,6 +277,19 @@ def main() -> None:
     tbx_list_name = _detect_tbx_list(tbx_root)
     print(f"  tbx_images : {tbx_images} (list={tbx_list_name})")
 
+    # The trainer's _build_tbx11k_samples expects the TBX11K *root* (the
+    # directory that contains both ``imgs/`` and ``lists/``), not the
+    # ``imgs/`` subdir. Some Kaggle mirrors nest TBX11K one level deep,
+    # so pick whichever of ``tbx_root`` or ``tbx_root/TBX11K`` actually
+    # holds the ``imgs/`` subtree.
+    if (tbx_root / "imgs").exists():
+        tbx_dataset_root = tbx_root
+    elif (tbx_root / "TBX11K" / "imgs").exists():
+        tbx_dataset_root = tbx_root / "TBX11K"
+    else:
+        tbx_dataset_root = tbx_root
+    print(f"  tbx_root   : {tbx_dataset_root}")
+
     save_dir = KAGGLE_WORKING / "component1_runs" if KAGGLE_WORKING.exists() else repo_root / "outputs" / "component1_runs"
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -283,7 +304,7 @@ def main() -> None:
         repo_root,
         montgomery=montgomery,
         shenzhen=shenzhen,
-        tbx11k=tbx_images,
+        tbx11k=tbx_dataset_root,
         nih=nih_root,
         save_dir=save_dir,
     )
