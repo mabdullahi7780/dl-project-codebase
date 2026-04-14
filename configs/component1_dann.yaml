@@ -1,7 +1,9 @@
 component1_dann:
   encoder:
     backend: auto
-    checkpoint_path: ${SAM_VIT_H_CKPT:-checkpoints/sam/sam_vit_h_4b8939.pth}
+    # Component 1 now uses MedSAM ViT-B (same neck contract as SAM ViT-B):
+    # small enough to fit a Kaggle T4, same [B,256,64,64] embedding.
+    checkpoint_path: ${MEDSAM_VIT_B_CKPT:-checkpoints/medsam/medsam_vit_b.pth}
     freeze_backbone: true
     input_size: 1024
     patch_size: 16

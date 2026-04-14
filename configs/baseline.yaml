@@ -17,9 +17,12 @@ runtime:
 
 component1:
   backend: auto
-  checkpoint_path: checkpoints/sam/sam_vit_h_4b8939.pth
+  # Component 1 shares the MedSAM ViT-B backbone with Component 4; it is the
+  # same weight-compatible image encoder checkpoint, just loaded by a
+  # different wrapper.
+  checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
   # Optional: LoRA + DANN-head adapters from train_component1_dann.py
-  # (.safetensors or .pt). Loaded on top of the SAM ViT-H backbone.
+  # (.safetensors or .pt). Loaded on top of the MedSAM ViT-B backbone.
   adapter_path: null
 
 component2:

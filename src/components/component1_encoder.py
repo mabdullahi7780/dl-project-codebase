@@ -16,6 +16,7 @@ SAM_INPUT_SIZE = 1024
 SAM_PATCH_SIZE = 16
 SAM_EMBED_SIZE = 64
 SAM_NECK_CHANNELS = 256
+MEDSAM_MODEL_TYPE = "vit_b"
 
 
 @dataclass(slots=True)
@@ -206,8 +207,14 @@ class MockSAMViTHImageEncoder(nn.Module):
         return self.neck(x)
 
 
-class SegmentAnythingViTHEncoder(nn.Module):
-    """Thin wrapper around the official Segment Anything ViT-H image encoder."""
+class MedSAMViTBEncoder(nn.Module):
+    """Thin wrapper around the MedSAM ViT-B image encoder.
+
+    Uses ``sam_model_registry["vit_b"]`` because MedSAM fine-tuned SAM ViT-B
+    and its checkpoint is weight-compatible with that architecture. The neck
+    still produces a ``[B, 256, 64, 64]`` embedding, so the downstream shape
+    contract is unchanged.
+    """
 
     def __init__(self, checkpoint_path: str | None = None) -> None:
         super().__init__()
@@ -218,7 +225,7 @@ class SegmentAnythingViTHEncoder(nn.Module):
                 "segment_anything is not installed. Install it or switch config.encoder.backend to 'mock'."
             ) from exc
 
-        sam = sam_model_registry["vit_h"](checkpoint=None)
+        sam = sam_model_registry[MEDSAM_MODEL_TYPE](checkpoint=None)
         if checkpoint_path is not None:
             load_checkpoint_into_module(sam, checkpoint_path)
         self.image_encoder = sam.image_encoder
@@ -345,7 +352,7 @@ def build_component1_encoder(config: Component1EncoderConfig | None = None) -> C
     backend = resolve_component1_backend(cfg)
 
     if backend == "segment_anything":
-        backbone: nn.Module = SegmentAnythingViTHEncoder(checkpoint_path=cfg.checkpoint_path)
+        backbone: nn.Module = MedSAMViTBEncoder(checkpoint_path=cfg.checkpoint_path)
     elif backend == "mock":
         backbone = MockSAMViTHImageEncoder(
             input_channels=cfg.input_channels,

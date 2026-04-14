@@ -44,7 +44,33 @@ DOMAIN_TO_ID: dict[str, int] = {
     "nih_cxr14": 3,
 }
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+ARCHIVE_SUFFIXES = {".tar", ".tar.gz", ".tgz", ".zip"}
 ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-([^}]+))?\}")
+
+# Directory-name fragments that never contain CXR images and should be
+# excluded from Montgomery / Shenzhen / TBX discovery (case-insensitive).
+_MASK_DIR_TOKENS = ("mask", "manualmask", "leftmask", "rightmask", "segmentation", "segmask")
+
+# Preferred image subdirectories by dataset (searched in order); if none
+# exist we fall back to a filtered recursive walk.
+_PREFERRED_IMAGE_SUBDIRS: dict[str, tuple[str, ...]] = {
+    "montgomery": (
+        "MontgomerySet/CXR_png",
+        "CXR_png",
+        "images",
+    ),
+    "shenzhen": (
+        "ChinaSet_AllFiles/CXR_png",
+        "CXR_png",
+        "images",
+    ),
+}
+
+# NIH metadata CSV filenames as distributed across Kaggle / NIH mirrors.
+_NIH_METADATA_CANDIDATES: tuple[str, ...] = (
+    "Data_Entry_2017_v2020.csv",
+    "Data_Entry_2017.csv",
+)
 
 
 @dataclass(slots=True)
@@ -90,6 +116,7 @@ class Component1DomainDataset(Dataset[dict[str, Any]]):
     ) -> None:
         self.samples = samples
         self._tar_cache: dict[str, tarfile.TarFile] = {}
+        self._zip_cache: dict[str, Any] = {}
         self.apply_augmentation = apply_augmentation
         self.augmentation_datasets = augmentation_datasets
         self.gamma_range = gamma_range
@@ -129,14 +156,28 @@ class Component1DomainDataset(Dataset[dict[str, Any]]):
         if sample.archive_path is None or sample.member_name is None:
             raise ValueError(f"Incomplete sample reference: {sample!r}")
 
-        archive = self._tar_cache.get(sample.archive_path)
+        archive_path = sample.archive_path
+        lowered = archive_path.lower()
+        if lowered.endswith(".zip"):
+            import zipfile
+
+            archive = self._zip_cache.get(archive_path)
+            if archive is None:
+                archive = zipfile.ZipFile(archive_path, mode="r")
+                self._zip_cache[archive_path] = archive
+            with archive.open(sample.member_name) as member:
+                with Image.open(io.BytesIO(member.read())) as image:
+                    return np.asarray(image.convert("L"))
+
+        mode = "r:gz" if lowered.endswith((".tar.gz", ".tgz")) else "r:"
+        archive = self._tar_cache.get(archive_path)
         if archive is None:
-            archive = tarfile.open(sample.archive_path, mode="r:gz")
-            self._tar_cache[sample.archive_path] = archive
+            archive = tarfile.open(archive_path, mode=mode)
+            self._tar_cache[archive_path] = archive
 
         member = archive.extractfile(sample.member_name)
         if member is None:
-            raise FileNotFoundError(f"Missing tar member {sample.member_name!r} in {sample.archive_path}.")
+            raise FileNotFoundError(f"Missing tar member {sample.member_name!r} in {archive_path}.")
         with member:
             with Image.open(io.BytesIO(member.read())) as image:
                 return np.asarray(image.convert("L"))
@@ -176,7 +217,21 @@ def load_yaml_config(path: str | Path) -> dict[str, Any]:
         return _resolve_env_vars(yaml.safe_load(handle))
 
 
-def _iter_image_paths(root: Path) -> list[Path]:
+def _path_has_mask_token(path: Path, root: Path) -> bool:
+    """True if any path component between ``root`` and ``path`` is a mask folder."""
+
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        rel = path
+    for part in rel.parts[:-1]:  # exclude the filename itself
+        lowered = part.lower()
+        if any(token in lowered for token in _MASK_DIR_TOKENS):
+            return True
+    return False
+
+
+def _iter_image_paths(root: Path, *, exclude_mask_dirs: bool = True) -> list[Path]:
     if not root.exists():
         return []
 
@@ -188,12 +243,31 @@ def _iter_image_paths(root: Path) -> list[Path]:
             continue
         if path.suffix.lower() not in IMAGE_SUFFIXES:
             continue
+        if exclude_mask_dirs and _path_has_mask_token(path, root):
+            continue
         paths.append(path)
     return paths
 
 
+def _resolve_image_root(dataset_id: str, root: Path) -> Path:
+    """Pick the best image subdirectory for Montgomery/Shenzhen.
+
+    Montgomery and Shenzhen ship with mask folders alongside CXRs; if the
+    canonical ``CXR_png`` subdir is present we descend into it so that even
+    an unfiltered glob cannot pick up masks.
+    """
+
+    preferred = _PREFERRED_IMAGE_SUBDIRS.get(dataset_id, ())
+    for sub in preferred:
+        candidate = root / sub
+        if candidate.exists():
+            return candidate
+    return root
+
+
 def _build_generic_image_samples(dataset_id: str, root: Path) -> list[DomainSampleRef]:
     canonical = canonicalise_dataset_id(dataset_id)
+    image_root = _resolve_image_root(canonical, root)
     return [
         DomainSampleRef(
             dataset_id=canonical,
@@ -201,7 +275,7 @@ def _build_generic_image_samples(dataset_id: str, root: Path) -> list[DomainSamp
             source=str(path),
             image_path=str(path),
         )
-        for path in _iter_image_paths(root)
+        for path in _iter_image_paths(image_root, exclude_mask_dirs=True)
     ]
 
 
@@ -256,33 +330,159 @@ def _normalise_nih_cache(payload: dict[str, Any]) -> dict[str, dict[str, str]]:
     return normalised
 
 
+def _iter_nih_extracted_images(search_roots: list[Path]) -> dict[str, str]:
+    """Walk pre-extracted NIH image folders and index them by basename.
+
+    Supports both the Kaggle public layout (``images_001/images/*.png`` …
+    ``images_012/images/*.png``) and a flat ``images/*.png`` layout.
+    """
+
+    index: dict[str, str] = {}
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.startswith("._"):
+                continue
+            if path.suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            # First occurrence wins so the index is deterministic.
+            index.setdefault(path.name, str(path))
+    return index
+
+
+def _iter_nih_archives(search_roots: list[Path]) -> list[Path]:
+    archives: list[Path] = []
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.iterdir()):
+            if not path.is_file():
+                continue
+            name = path.name.lower()
+            if name.endswith(".tar.gz") or name.endswith(".tgz"):
+                archives.append(path)
+            elif name.endswith(".tar") or name.endswith(".zip"):
+                archives.append(path)
+    return archives
+
+
+def _index_tar_archive(archive_path: Path) -> dict[str, dict[str, str]]:
+    mode = "r:gz" if archive_path.name.lower().endswith((".tar.gz", ".tgz")) else "r:"
+    out: dict[str, dict[str, str]] = {}
+    with tarfile.open(archive_path, mode=mode) as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            member_name = Path(member.name).name
+            if member_name.startswith("._"):
+                continue
+            if Path(member_name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            out[member_name] = {
+                "archive_path": str(archive_path),
+                "member_name": member.name,
+            }
+    return out
+
+
+def _index_zip_archive(archive_path: Path) -> dict[str, dict[str, str]]:
+    import zipfile
+
+    out: dict[str, dict[str, str]] = {}
+    with zipfile.ZipFile(archive_path, mode="r") as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            member_name = Path(info.filename).name
+            if member_name.startswith("._"):
+                continue
+            if Path(member_name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            out[member_name] = {
+                "archive_path": str(archive_path),
+                "member_name": info.filename,
+            }
+    return out
+
+
 def _build_nih_archive_index(images_root: Path, cache_path: Path | None = None) -> dict[str, dict[str, str]]:
+    """Discover NIH images across tar.gz / tar / zip / pre-extracted layouts.
+
+    The Kaggle public dump keeps images as ``images_NNN/images/*.png`` with
+    no archive at all; the original NIH box distributed 12 tar.gz shards;
+    some mirrors ship a single zip. All three are handled.
+    """
+
     if cache_path is not None and cache_path.exists():
         with cache_path.open("r", encoding="utf-8") as handle:
             return _normalise_nih_cache(json.load(handle))
 
-    archives = sorted(path for path in images_root.glob("*.tar.gz") if path.is_file())
+    # Candidate roots to search. ``images_root`` is typically ``root/images``
+    # but the Kaggle layout keeps the numbered shards directly under
+    # ``root/``. Include the parent to cover both.
+    search_roots: list[Path] = [images_root]
+    if images_root.parent != images_root:
+        search_roots.append(images_root.parent)
+
     archive_index: dict[str, dict[str, str]] = {}
-    for archive_path in archives:
-        with tarfile.open(archive_path, mode="r:gz") as archive:
-            for member in archive.getmembers():
-                if not member.isfile():
-                    continue
-                member_name = Path(member.name).name
-                if member_name.startswith("._"):
-                    continue
-                if Path(member_name).suffix.lower() not in IMAGE_SUFFIXES:
-                    continue
-                archive_index[member_name] = {
-                    "archive_path": str(archive_path),
-                    "member_name": member.name,
-                }
+
+    # 1. Pre-extracted layouts (Kaggle, or already-unpacked NIH dumps).
+    for basename, path in _iter_nih_extracted_images(search_roots).items():
+        archive_index[basename] = {
+            "archive_path": "",
+            "member_name": path,
+        }
+
+    # 2. Archive layouts (tar.gz / tar / zip). Pre-extracted entries take
+    # precedence so we don't overwrite a usable file path with an archive
+    # reference.
+    for archive_path in _iter_nih_archives(search_roots):
+        name = archive_path.name.lower()
+        try:
+            if name.endswith(".zip"):
+                new_entries = _index_zip_archive(archive_path)
+            else:
+                new_entries = _index_tar_archive(archive_path)
+        except (tarfile.TarError, OSError) as exc:
+            print(f"WARNING: failed to index NIH archive {archive_path}: {exc}")
+            continue
+        for basename, entry in new_entries.items():
+            archive_index.setdefault(basename, entry)
 
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with cache_path.open("w", encoding="utf-8") as handle:
             json.dump(archive_index, handle, indent=2, sort_keys=True)
     return archive_index
+
+
+def _resolve_nih_metadata_csv(root: Path, metadata_csv: str | None) -> Path:
+    """Try a sequence of NIH metadata CSV filenames.
+
+    ``metadata_csv`` (from config) is tried first if provided, then the
+    canonical candidates in ``_NIH_METADATA_CANDIDATES``. Raises a helpful
+    error if none are found.
+    """
+
+    tried: list[Path] = []
+    candidates: list[str] = []
+    if metadata_csv:
+        candidates.append(metadata_csv)
+    for name in _NIH_METADATA_CANDIDATES:
+        if name not in candidates:
+            candidates.append(name)
+    for name in candidates:
+        candidate_path = root / name
+        tried.append(candidate_path)
+        if candidate_path.is_file():
+            return candidate_path
+    raise FileNotFoundError(
+        "Could not locate an NIH metadata CSV. Tried: "
+        + ", ".join(str(path) for path in tried)
+    )
 
 
 def _build_nih_samples(
@@ -299,10 +499,7 @@ def _build_nih_samples(
             raise FileNotFoundError(f"Expected NIH split file at {split_path}.")
         image_names = _load_lines(split_path)
     else:
-        metadata_name = metadata_csv or "Data_Entry_2017_v2020.csv"
-        metadata_path = root / metadata_name
-        if not metadata_path.exists():
-            raise FileNotFoundError(f"Expected NIH metadata CSV at {metadata_path}.")
+        metadata_path = _resolve_nih_metadata_csv(root, metadata_csv)
         image_names = _load_nih_metadata_image_ids(metadata_path)
 
     samples: list[DomainSampleRef] = []
@@ -310,15 +507,29 @@ def _build_nih_samples(
         archive_ref = archive_index.get(image_name)
         if archive_ref is None:
             continue
-        samples.append(
-            DomainSampleRef(
-                dataset_id="nih_cxr14",
-                domain_id=DOMAIN_TO_ID["nih_cxr14"],
-                source=image_name,
-                archive_path=archive_ref["archive_path"],
-                member_name=archive_ref["member_name"],
+        archive_path_str = archive_ref.get("archive_path", "")
+        member_name = archive_ref.get("member_name", "")
+        # Pre-extracted files: ``archive_path`` is empty and ``member_name``
+        # holds the on-disk absolute path. Archive members: both fields set.
+        if not archive_path_str and member_name and Path(member_name).is_file():
+            samples.append(
+                DomainSampleRef(
+                    dataset_id="nih_cxr14",
+                    domain_id=DOMAIN_TO_ID["nih_cxr14"],
+                    source=image_name,
+                    image_path=member_name,
+                )
             )
-        )
+        else:
+            samples.append(
+                DomainSampleRef(
+                    dataset_id="nih_cxr14",
+                    domain_id=DOMAIN_TO_ID["nih_cxr14"],
+                    source=image_name,
+                    archive_path=archive_path_str,
+                    member_name=member_name,
+                )
+            )
     return samples
 
 
