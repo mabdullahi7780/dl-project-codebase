@@ -34,6 +34,9 @@ component1_dann:
     lr_dann: 1.0e-3
     weight_decay: 1.0e-4
     limit_per_domain: null
+    amp: true                   # fp16 autocast on CUDA only; silently off on MPS/CPU
+    save_every: 1               # epochs between last_* snapshots (for Kaggle session kills)
+    resume_checkpoint: null     # path to last_* checkpoint; overridden by --resume
     save_dir: ${COMPONENT1_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component1}
     save_name: component1_dann_full.pt
     adapter_save_name: lora_adapters.safetensors

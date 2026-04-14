@@ -29,6 +29,7 @@ from src.components.component1_encoder import (
     Component1EncoderConfig,
     LoRAConfig,
     build_component1_encoder,
+    extract_trainable_state_dict,
     save_trainable_state_dict,
 )
 from src.core.device import pick_device
@@ -449,6 +450,8 @@ def train_one_epoch(
     device: torch.device,
     ramp_epochs: int,
     max_lambda: float,
+    amp_enabled: bool = False,
+    scaler: "torch.amp.GradScaler | None" = None,
 ) -> dict[str, float]:
     from tqdm.auto import tqdm
 
@@ -464,10 +467,19 @@ def train_one_epoch(
         domain_targets = batch["domain_id"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
-        _, dom_logits = model(x_3ch, lambda_=lambda_)
-        loss = domain_classification_loss(dom_logits, domain_targets)
-        loss.backward()
-        optimizer.step()
+        if amp_enabled:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                _, dom_logits = model(x_3ch, lambda_=lambda_)
+                loss = domain_classification_loss(dom_logits, domain_targets)
+            assert scaler is not None
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            _, dom_logits = model(x_3ch, lambda_=lambda_)
+            loss = domain_classification_loss(dom_logits, domain_targets)
+            loss.backward()
+            optimizer.step()
 
         running_loss += float(loss.item()) * int(domain_targets.shape[0])
         predictions = dom_logits.argmax(dim=1)
@@ -482,6 +494,73 @@ def train_one_epoch(
     average_loss = running_loss / max(running_items, 1)
     accuracy = running_correct / max(running_items, 1)
     return {"loss": average_loss, "accuracy": accuracy, "lambda": lambda_}
+
+
+def save_last_snapshot(
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    *,
+    epoch: int,
+    metrics: dict[str, float],
+    config: dict[str, Any],
+    save_dir: Path,
+    scaler: "torch.amp.GradScaler | None" = None,
+) -> Path:
+    """Write a resume-friendly snapshot after each epoch.
+
+    Kaggle sessions can die without warning; this lets ``--resume`` pick up
+    from the start of the next epoch without re-running completed ones.
+    """
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "trainable_state_dict": extract_trainable_state_dict(model),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "epoch": int(epoch),
+        "metrics": metrics,
+        "config": config,
+    }
+    if scaler is not None:
+        payload["scaler_state_dict"] = scaler.state_dict()
+    snapshot_path = save_dir / "last_component1_snapshot.pt"
+    torch.save(payload, snapshot_path)
+    return snapshot_path
+
+
+def maybe_resume_component1(
+    resume_path: str | Path | None,
+    *,
+    model: Component1DANNModel,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    scaler: "torch.amp.GradScaler | None" = None,
+) -> int:
+    """Restore trainable params + optimizer state from a snapshot. Returns next epoch."""
+
+    if not resume_path:
+        return 0
+    snapshot = Path(resume_path).expanduser()
+    if not snapshot.is_file():
+        raise FileNotFoundError(f"Resume snapshot not found: {snapshot}")
+    payload = torch.load(snapshot, map_location=device, weights_only=False)
+
+    state_dict = payload.get("trainable_state_dict")
+    if state_dict is None:
+        raise ValueError(
+            f"Snapshot {snapshot} has no `trainable_state_dict` (wrong format?)."
+        )
+    missing = model.load_state_dict(state_dict, strict=False)
+    if missing.unexpected_keys:
+        raise ValueError(
+            f"Unexpected keys in resume snapshot {snapshot}: {missing.unexpected_keys[:5]}"
+        )
+    if "optimizer_state_dict" in payload:
+        optimizer.load_state_dict(payload["optimizer_state_dict"])
+    if scaler is not None and "scaler_state_dict" in payload:
+        scaler.load_state_dict(payload["scaler_state_dict"])
+    start_epoch = int(payload.get("epoch", -1)) + 1
+    print(f"Resumed from {snapshot} at epoch {start_epoch}")
+    return start_epoch
 
 
 def save_checkpoint(
@@ -525,6 +604,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/component1_dann.yaml")
     parser.add_argument("--paths", default="configs/paths.yaml")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to last_component1_snapshot.pt (overrides config.training.resume_checkpoint).",
+    )
     return parser.parse_args()
 
 
@@ -564,9 +648,28 @@ def main() -> None:
         collate_fn=collate_component1_batch,
     )
 
+    amp_requested = bool(config["training"].get("amp", False))
+    amp_enabled = amp_requested and device.type == "cuda"
+    if amp_requested and not amp_enabled:
+        print(f"AMP requested but device is {device.type}; AMP disabled.")
+    scaler = torch.amp.GradScaler("cuda") if amp_enabled else None
+
+    resume_path = args.resume or config["training"].get("resume_checkpoint")
+    start_epoch = maybe_resume_component1(
+        resume_path,
+        model=model,
+        optimizer=optimizer,
+        device=device,
+        scaler=scaler,
+    )
+
+    save_dir = Path(config["training"]["save_dir"])
+    save_every = int(config["training"].get("save_every", 1))
+    history_path = save_dir / "component1_training_history.jsonl"
+
     epochs = int(config["training"]["epochs"])
     metrics: dict[str, float] = {}
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         metrics = train_one_epoch(
             model,
             loader,
@@ -575,6 +678,8 @@ def main() -> None:
             device=device,
             ramp_epochs=int(config["training"]["grl_ramp_epochs"]),
             max_lambda=float(config["training"]["max_lambda"]),
+            amp_enabled=amp_enabled,
+            scaler=scaler,
         )
         print(
             f"epoch={epoch + 1}/{epochs} "
@@ -582,6 +687,22 @@ def main() -> None:
             f"acc={metrics['accuracy']:.4f} "
             f"lambda={metrics['lambda']:.4f}"
         )
+
+        save_dir.mkdir(parents=True, exist_ok=True)
+        with history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"epoch": epoch, **metrics}) + "\n")
+
+        if save_every and ((epoch - start_epoch + 1) % save_every == 0):
+            snapshot = save_last_snapshot(
+                model,
+                optimizer,
+                epoch=epoch,
+                metrics=metrics,
+                config=config,
+                save_dir=save_dir,
+                scaler=scaler,
+            )
+            print(f"  -> snapshot: {snapshot}")
 
     adapter_path = save_component1_artifacts(model, optimizer, metrics, config)
     print(f"saved trainable adapters to {adapter_path}")

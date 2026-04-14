@@ -14,6 +14,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--outdir", required=True)
     parser.add_argument("--config", default="configs/baseline.yaml")
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--component4-decoder-ckpt",
+        default=None,
+        help="Path to a fine-tuned Component 4 mask decoder checkpoint (overrides config).",
+    )
+    parser.add_argument(
+        "--component1-adapter",
+        default=None,
+        help="Path to Component 1 LoRA+DANN adapters (overrides config).",
+    )
     return parser.parse_args()
 
 
@@ -43,6 +53,8 @@ def main() -> None:
                 view=row.get("view") or None,
                 pixel_spacing_cm=float(row["pixel_spacing_cm"]) if row.get("pixel_spacing_cm") else None,
                 seed=args.seed,
+                component4_decoder_ckpt=args.component4_decoder_ckpt,
+                component1_adapter_path=args.component1_adapter,
             )
             results.append(
                 {

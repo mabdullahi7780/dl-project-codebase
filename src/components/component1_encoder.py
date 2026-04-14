@@ -303,6 +303,43 @@ def save_trainable_state_dict(module: nn.Module, path: str | Path) -> Path:
     return destination
 
 
+def load_trainable_state_dict(module: nn.Module, path: str | Path) -> Path:
+    """Load LoRA + DANN adapter weights saved by ``save_trainable_state_dict``.
+
+    Accepts ``.safetensors``, raw ``.pt`` state dicts, or a training snapshot
+    dict containing a ``trainable_state_dict`` key. Non-matching keys are
+    ignored so old snapshots stay forward-compatible.
+    """
+
+    source = Path(path).expanduser()
+    if not source.is_file():
+        raise FileNotFoundError(f"Component 1 adapter file not found: {source}")
+
+    if source.suffix == ".safetensors":
+        try:
+            from safetensors.torch import load_file
+        except ImportError as exc:  # pragma: no cover - depends on optional dependency
+            raise ImportError(
+                "Loading `.safetensors` requires the `safetensors` package."
+            ) from exc
+        state_dict: dict[str, torch.Tensor] = load_file(str(source))
+    else:
+        payload = torch.load(source, map_location="cpu", weights_only=False)
+        if isinstance(payload, dict) and "trainable_state_dict" in payload:
+            state_dict = payload["trainable_state_dict"]
+        elif isinstance(payload, dict):
+            state_dict = {k: v for k, v in payload.items() if isinstance(v, torch.Tensor)}
+        else:
+            raise ValueError(f"Unrecognised adapter payload at {source}.")
+
+    result = module.load_state_dict(state_dict, strict=False)
+    if result.unexpected_keys:
+        raise ValueError(
+            f"Unexpected keys in adapter file {source}: {result.unexpected_keys[:5]}"
+        )
+    return source
+
+
 def build_component1_encoder(config: Component1EncoderConfig | None = None) -> Component1Encoder:
     cfg = config or Component1EncoderConfig()
     backend = resolve_component1_backend(cfg)

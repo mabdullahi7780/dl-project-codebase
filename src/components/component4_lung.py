@@ -259,6 +259,24 @@ class Component4MedSAM(nn.Module):
     def load_decoder_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
         self.decoder.load_state_dict(state_dict, strict=True)
 
+    def load_trained_decoder(self, checkpoint_path: str | Path) -> Path:
+        """Load a fine-tuned decoder checkpoint produced by train_component4_lung.
+
+        Accepts either a full training payload (dict with ``decoder_state_dict``)
+        or a raw decoder state_dict. Returns the resolved checkpoint path.
+        """
+
+        path = Path(checkpoint_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Component 4 decoder checkpoint not found: {path}")
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        if isinstance(payload, dict) and "decoder_state_dict" in payload:
+            state_dict = payload["decoder_state_dict"]
+        else:
+            state_dict = payload
+        self.load_decoder_state_dict(state_dict)
+        return path
+
 
 def bce_dice_loss(logits: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-5) -> torch.Tensor:
     bce = F.binary_cross_entropy_with_logits(logits, targets)

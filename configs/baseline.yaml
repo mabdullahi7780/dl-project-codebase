@@ -18,6 +18,9 @@ runtime:
 component1:
   backend: auto
   checkpoint_path: checkpoints/sam/sam_vit_h_4b8939.pth
+  # Optional: LoRA + DANN-head adapters from train_component1_dann.py
+  # (.safetensors or .pt). Loaded on top of the SAM ViT-H backbone.
+  adapter_path: null
 
 component2:
   backend: auto
@@ -29,6 +32,9 @@ component4:
   checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
   model_type: vit_b
   mask_threshold: 0.5
+  # Optional: path to a fine-tuned mask decoder (from train_component4_lung.py).
+  # If set, this is loaded on top of the MedSAM backbone at inference time.
+  decoder_checkpoint_path: checkpoints/component4/component4_mask_decoder.pt
 
 baseline_lesion_proposer:
   suspicious_class_threshold: 0.55

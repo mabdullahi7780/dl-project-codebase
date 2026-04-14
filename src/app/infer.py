@@ -18,7 +18,11 @@ from src.components.baseline_lesion_proposer import (
 from src.components.component0_qc import harmonise_sample
 from src.components.component10_report import generate_baseline_report
 from src.components.component1_dann import Component1DANNModel, DANNHead
-from src.components.component1_encoder import Component1EncoderConfig, build_component1_encoder
+from src.components.component1_encoder import (
+    Component1EncoderConfig,
+    build_component1_encoder,
+    load_trainable_state_dict,
+)
 from src.components.component2_txv import Component2SoftDomainContext
 from src.components.component4_lung import Component4MedSAM
 from src.components.component7_boundary import score_boundary_quality
@@ -84,6 +88,12 @@ def build_models(
         )
     )
     component1_model = Component1DANNModel(encoder=encoder, head=DANNHead()).to(device)
+    component1_model.loaded_adapter_path = None  # type: ignore[attr-defined]
+    adapter_path = component1_cfg.get("adapter_path")
+    if adapter_path:
+        loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
+        component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
+        print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
     component2_model = Component2SoftDomainContext(
         backend=str(config.get("component2", {}).get("backend", "auto")),
         weights=str(config.get("component2", {}).get("weights", "densenet121-res224-all")),
@@ -94,6 +104,18 @@ def build_models(
         model_type=str(component4_cfg.get("model_type", "vit_b")),
         mask_threshold=float(component4_cfg.get("mask_threshold", 0.5)),
     ).to(device)
+    decoder_ckpt = component4_cfg.get("decoder_checkpoint_path")
+    component4_model.loaded_decoder_checkpoint = None  # type: ignore[attr-defined]
+    if decoder_ckpt:
+        if component4_model.active_backend != "medsam":
+            print(
+                f"WARNING: decoder_checkpoint_path set but Component 4 backend is "
+                f"{component4_model.active_backend!r}; fine-tuned decoder NOT loaded."
+            )
+        else:
+            loaded = component4_model.load_trained_decoder(decoder_ckpt)
+            component4_model.loaded_decoder_checkpoint = str(loaded)  # type: ignore[attr-defined]
+            print(f"Component 4: loaded fine-tuned decoder from {loaded}")
     component1_model.eval()
     component2_model.eval()
     component4_model.eval()
@@ -109,8 +131,14 @@ def run_single_image_inference(
     view: str | None = None,
     pixel_spacing_cm: float | None = None,
     seed: int = 1337,
+    component4_decoder_ckpt: str | Path | None = None,
+    component1_adapter_path: str | Path | None = None,
 ) -> BaselineInferenceBundle:
     config = load_baseline_config(config_path)
+    if component4_decoder_ckpt is not None:
+        config.setdefault("component4", {})["decoder_checkpoint_path"] = str(component4_decoder_ckpt)
+    if component1_adapter_path is not None:
+        config.setdefault("component1", {})["adapter_path"] = str(component1_adapter_path)
     seed_everything(seed)
     device = pick_device(config.get("runtime", {}).get("device"))
 
@@ -258,6 +286,8 @@ def run_single_image_inference(
                 "component1_backend": component1_model.encoder.active_backend,
                 "component2_backend": component2_model.active_backend,
                 "component4_backend": component4_model.active_backend,
+                "component4_decoder_ckpt": getattr(component4_model, "loaded_decoder_checkpoint", None),
+                "component1_adapter_path": getattr(component1_model, "loaded_adapter_path", None),
                 "selected_classes": lesion_proposal.selected_classes[0],
                 "boundary_score": boundary.boundary_score,
                 "fp_probability": fp_audit.fp_probability,
@@ -279,6 +309,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--view", default=None)
     parser.add_argument("--pixel-spacing-cm", type=float, default=None)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--component4-decoder-ckpt",
+        default=None,
+        help="Path to a fine-tuned Component 4 mask decoder checkpoint (overrides config).",
+    )
+    parser.add_argument(
+        "--component1-adapter",
+        default=None,
+        help="Path to Component 1 LoRA+DANN adapters (overrides config).",
+    )
     return parser.parse_args()
 
 
@@ -292,6 +332,8 @@ def main() -> None:
         view=args.view,
         pixel_spacing_cm=args.pixel_spacing_cm,
         seed=args.seed,
+        component4_decoder_ckpt=args.component4_decoder_ckpt,
+        component1_adapter_path=args.component1_adapter,
     )
     print(
         json.dumps(
