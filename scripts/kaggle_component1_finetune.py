@@ -83,7 +83,7 @@ MODE_PRESETS: dict[str, dict[str, object]] = {
         "epochs": 8,
         "batch_size": 2,
         "num_workers": 2,
-        "limit_per_domain": None,
+        "limit_per_domain": 1000,
     },
     # No training — just print manifest counts per domain.
     "dry": {
