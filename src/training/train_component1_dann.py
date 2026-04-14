@@ -338,14 +338,20 @@ def build_component1_manifest(
     samples.extend(_build_generic_image_samples("montgomery", Path(dataset_roots["montgomery"])))
     samples.extend(_build_generic_image_samples("shenzhen", Path(dataset_roots["shenzhen"])))
     samples.extend(_build_tbx11k_samples(Path(dataset_roots["tbx11k"]), tbx_list))
-    samples.extend(
-        _build_nih_samples(
-            Path(dataset_roots["nih_cxr14"]),
-            nih_split,
-            cache_path=cache_path,
-            metadata_csv=nih_metadata_csv,
+
+    nih_root = Path(dataset_roots["nih_cxr14"])
+    if nih_root.exists():
+        samples.extend(
+            _build_nih_samples(
+                nih_root,
+                nih_split,
+                cache_path=cache_path,
+                metadata_csv=nih_metadata_csv,
+            )
         )
-    )
+    else:
+        print(f"INFO: NIH CXR14 root not found at {nih_root} — skipping (sampling weight=1.0).")
+
     return samples
 
 
@@ -444,13 +450,16 @@ def train_one_epoch(
     ramp_epochs: int,
     max_lambda: float,
 ) -> dict[str, float]:
+    from tqdm.auto import tqdm
+
     model.train()
     running_loss = 0.0
     running_correct = 0
     running_items = 0
     lambda_ = compute_dann_lambda(epoch, ramp_epochs=ramp_epochs, max_lambda=max_lambda)
 
-    for batch in loader:
+    progress = tqdm(loader, desc=f"epoch {epoch}", leave=False, dynamic_ncols=True)
+    for batch in progress:
         x_3ch = batch["x_3ch"].to(device)
         domain_targets = batch["domain_id"].to(device)
 
@@ -464,6 +473,11 @@ def train_one_epoch(
         predictions = dom_logits.argmax(dim=1)
         running_correct += int((predictions == domain_targets).sum().item())
         running_items += int(domain_targets.shape[0])
+        progress.set_postfix(
+            loss=f"{running_loss / max(running_items, 1):.4f}",
+            acc=f"{running_correct / max(running_items, 1):.3f}",
+            lam=f"{lambda_:.2f}",
+        )
 
     average_loss = running_loss / max(running_items, 1)
     accuracy = running_correct / max(running_items, 1)

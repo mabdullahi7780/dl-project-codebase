@@ -21,3 +21,4 @@ include = ["src", "src.*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+pythonpath = ["."]

@@ -28,7 +28,7 @@ component4:
   backend: auto
   checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
   model_type: vit_b
-  mask_threshold: 0.7
+  mask_threshold: 0.5
 
 baseline_lesion_proposer:
   suspicious_class_threshold: 0.55

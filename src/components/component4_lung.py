@@ -155,25 +155,31 @@ class Component4MedSAM(nn.Module):
         ).repeat(batch_size, 1)
 
     def _decode_real_masks(self, image_embeddings: torch.Tensor) -> torch.Tensor:
-        batch_size = image_embeddings.shape[0]
-        boxes = self._whole_image_box(
-            batch_size=batch_size,
-            device=image_embeddings.device,
-            dtype=image_embeddings.dtype,
-        )
-        sparse_embeddings, dense_embeddings = self.prompt_encoder(
-            points=None,
-            boxes=boxes,
-            masks=None,
-        )
-        low_res_masks, _ = self.decoder(
-            image_embeddings=image_embeddings,
-            image_pe=self.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
-            multimask_output=False,
-        )
-        return low_res_masks
+        # SAM's mask decoder uses repeat_interleave internally assuming
+        # (1 image, N prompts). Processing per-sample avoids the batch
+        # dimension mismatch when training with batch_size > 1.
+        all_masks = []
+        for i in range(image_embeddings.shape[0]):
+            emb = image_embeddings[i : i + 1]  # [1, C, H, W]
+            box = self._whole_image_box(
+                batch_size=1,
+                device=emb.device,
+                dtype=emb.dtype,
+            )
+            sparse_embeddings, dense_embeddings = self.prompt_encoder(
+                points=None,
+                boxes=box,
+                masks=None,
+            )
+            low_res_mask, _ = self.decoder(
+                image_embeddings=emb,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False,
+            )
+            all_masks.append(low_res_mask)
+        return torch.cat(all_masks, dim=0)
 
     def predict_masks(self, x_3ch: torch.Tensor) -> LungMaskOutput:
         if x_3ch.ndim != 4 or x_3ch.shape[1] != 3 or tuple(x_3ch.shape[2:]) != (MEDSAM_IMAGE_SIZE, MEDSAM_IMAGE_SIZE):
@@ -214,6 +220,44 @@ class Component4MedSAM(nn.Module):
 
     def forward(self, x_3ch: torch.Tensor) -> torch.Tensor:
         return self.predict_masks(x_3ch).lung_mask_1024
+
+    def forward_logits(self, x_3ch: torch.Tensor) -> torch.Tensor:
+        """Return raw mask logits at LOW_RES_MASK_SIZE for training.
+
+        The image encoder and prompt encoder are frozen; gradients only flow
+        through the mask decoder. Use this during training instead of
+        ``predict_masks`` to avoid the non-differentiable threshold step.
+        """
+
+        if x_3ch.ndim != 4 or x_3ch.shape[1] != 3 or tuple(x_3ch.shape[2:]) != (MEDSAM_IMAGE_SIZE, MEDSAM_IMAGE_SIZE):
+            raise ValueError(
+                f"Expected input [B, 3, {MEDSAM_IMAGE_SIZE}, {MEDSAM_IMAGE_SIZE}], got {tuple(x_3ch.shape)}"
+            )
+
+        with torch.no_grad():
+            image_embeddings = self._encode_image(x_3ch)
+
+        if self.backend == "medsam":
+            mask_logits = self._decode_real_masks(image_embeddings)
+        else:
+            batch_size = x_3ch.shape[0]
+            bbox = self._whole_image_box(batch_size=batch_size, device=x_3ch.device, dtype=x_3ch.dtype)
+            mask_logits = self.decoder(image_embeddings, bbox)
+
+        if tuple(mask_logits.shape[-2:]) != (LOW_RES_MASK_SIZE, LOW_RES_MASK_SIZE):
+            mask_logits = F.interpolate(
+                mask_logits,
+                size=(LOW_RES_MASK_SIZE, LOW_RES_MASK_SIZE),
+                mode="bilinear",
+                align_corners=False,
+            )
+        return mask_logits
+
+    def decoder_state_dict(self) -> dict[str, torch.Tensor]:
+        return {k: v.detach().cpu().clone() for k, v in self.decoder.state_dict().items()}
+
+    def load_decoder_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+        self.decoder.load_state_dict(state_dict, strict=True)
 
 
 def bce_dice_loss(logits: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-5) -> torch.Tensor:
