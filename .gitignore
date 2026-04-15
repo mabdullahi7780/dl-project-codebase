@@ -31,6 +31,11 @@ checkpoints/txv/*
 checkpoints/baseline/*
 checkpoints/reports/*
 
+# Component 1 adapters + training history live in the repo for baseline
+# reproducibility, but the 361 MB full snapshot and 2 MB resume snapshot do not.
+checkpoints/component1/*.pt
+checkpoints/component1/last_*.pt
+
 # Keep placeholder files
 !data/raw/.gitkeep
 !data/interim/.gitkeep
