@@ -189,10 +189,13 @@ def _write_override_config(
     data["nih_split"] = None
     if tbx_list_name is not None:
         data["tbx_list"] = tbx_list_name
+    # Uniform sampling so the DANN head can actually learn a 4-way decision
+    # boundary.  Earlier 100:20:2:1 weighting collapsed the head to
+    # "always Montgomery" (~5% accuracy on a balanced eval set).
     data["domain_sampling_weights"] = {
-        "montgomery": 100.0,
-        "shenzhen": 20.0,
-        "tbx11k": 2.0,
+        "montgomery": 1.0,
+        "shenzhen": 1.0,
+        "tbx11k": 1.0,
         "nih_cxr14": 1.0,
     }
 

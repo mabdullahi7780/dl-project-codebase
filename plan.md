@@ -14,7 +14,8 @@ Build a **working end-to-end baseline** first.
 The baseline must cover these components from the revised pipeline:
 
 - **Component 0** — QC + normalisation
-- **Component 1** — shared image encoder (SAM ViT-H + LoRA + DANN head)
+- **Component 1** — shared image encoder (**MedSAM ViT-B** + LoRA + DANN head)
+  - *Note: downgraded from SAM ViT-H to MedSAM ViT-B so the whole pipeline fits on a Kaggle free-tier T4 16 GB. The `[B, 256, 64, 64]` embedding contract is unchanged, so nothing downstream cares which ViT produced it.*
 - **Component 2** — soft domain context (TorchXRayVision DenseNet121)
 - **Component 4** — lung mask module (MedSAM ViT-B)
 - **Component 7** — verification/refinement
@@ -446,19 +447,29 @@ These preprocessing and harmonisation rules, including the `x_1024` / `x_224` / 
 
 Implement `src/components/component1_encoder.py` and `component1_dann.py`.
 
+### Backbone choice: MedSAM ViT-B (not SAM ViT-H)
+
+The revised baseline uses **MedSAM ViT-B** as the frozen backbone, not SAM ViT-H. Reasons:
+
+- MedSAM ViT-B is already pretrained on medical imagery (including CXRs), so the frozen features are a stronger starting point for TB than natural-image SAM.
+- ViT-B at 1024² with gradient checkpointing + LoRA fits on a Kaggle free-tier T4 (16 GB). SAM ViT-H does not.
+- The neck contract (`[B, 256, 64, 64]`) is identical between ViT-B and ViT-H, so every downstream component (lesion proposer, lung masker, C7/C8/C9/C10) is unchanged.
+
+Everywhere below that still says "SAM ViT-H" should be read as "MedSAM ViT-B" for the current baseline.
+
 ### Baseline requirement
 
 For the first delivered baseline, **inference support is required**.
 Training support should be scaffolded cleanly, but the first end-to-end demo may run with:
 
-- frozen SAM ViT-H without trained LoRA
+- frozen MedSAM ViT-B without trained LoRA
 - DANN head class instantiated but optional during inference
 
 ### What must exist in code
 
-- SAM ViT-H loader
+- MedSAM ViT-B loader (via `segment_anything`'s `sam_model_registry["vit_b"]`, fed the MedSAM checkpoint)
 - wrapper that returns image embedding `[B,256,64,64]`
-- LoRA injection hooks
+- LoRA injection hooks (targeting `qkv` Linear layers inside the ViT blocks)
 - DANN head class with 4-way output
 - checkpoint loading hooks
 
@@ -468,7 +479,7 @@ Training support should be scaffolded cleanly, but the first end-to-end demo may
 - output embedding: `[B, 256, 64, 64]`
 - domain logits: `[B, 4]`
 
-The revised plan fixes the shared encoder to frozen SAM ViT-H with LoRA adapters and a 4-class DANN head, with `img_emb` of shape `[B,256,64,64]` and `dom_logits` of shape `[B,4]`. fileciteturn2file0
+The revised plan fixes the shared encoder to **frozen MedSAM ViT-B** with LoRA adapters and a 4-class DANN head, with `img_emb` of shape `[B,256,64,64]` and `dom_logits` of shape `[B,4]`. Only the LoRA matrices and the DANN head are trainable; the MedSAM backbone weights are never updated.
 
 ### Training scaffold
 

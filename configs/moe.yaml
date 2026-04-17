@@ -1,0 +1,129 @@
+# MoE pipeline configuration
+# Used for training and inference with Components 3, 5, 6.
+#
+# To enable MoE inference, either:
+#   1. Use this config directly:  --config configs/moe.yaml
+#   2. Or add the `moe:` block to configs/baseline.yaml
+
+# ---- Shared backbone (same as baseline) ----
+component1:
+  backend: auto
+  checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+  adapter_path: checkpoints/component1/component1_adapters.safetensors
+
+component2:
+  backend: auto
+  weights: densenet121-res224-all
+  pathology_flag_threshold: 0.6
+
+component4:
+  backend: auto
+  checkpoint_path: checkpoints/medsam/medsam_vit_b.pth
+  model_type: vit_b
+  mask_threshold: 0.5
+  decoder_checkpoint_path: checkpoints/component4/component4_mask_decoder.pt
+
+# ---- MoE-specific ----
+moe:
+  enabled: true
+  num_experts: 4
+  checkpoint_path: checkpoints/moe/moe_checkpoint.pt
+
+  # Component 3 — Routing Gate
+  routing_temperature: 1.0
+  routing_top_k: null  # null = soft MoE (all experts), set 2 for sparse
+
+  # Component 5 — Expert Bank
+  expert_in_channels: 256
+  expert_mid_channels: 128
+  expert_dropout: 0.1
+
+  # Component 6 — Fusion
+  fusion_mode: weighted_logit   # "weighted_logit" | "weighted_prob"
+  learnable_fusion_bias: false
+
+# ---- MoE training ----
+moe_training:
+  # Phase 1: Expert pretraining (each expert independently)
+  pretrain:
+    epochs: 10
+    batch_size: 4
+    lr: 1e-4
+    weight_decay: 1e-4
+    scheduler: cosine
+    warmup_epochs: 1
+
+  # Phase 2: Joint MoE training (gate + experts + fusion)
+  joint:
+    epochs: 15
+    batch_size: 4
+    lr_gate: 5e-4
+    lr_experts: 1e-4
+    lr_fusion: 1e-4
+    weight_decay: 1e-4
+    scheduler: cosine
+    warmup_epochs: 2
+    load_balance_weight: 0.1    # auxiliary loss weight for routing balance
+    mask_loss: bce_dice          # "bce_dice" | "bce" | "dice"
+    grl_weight: 0.0              # domain loss (0 = not used in MoE phase)
+
+  # Phase 3: Boundary critic fine-tuning
+  boundary_critic:
+    epochs: 5
+    batch_size: 16
+    lr: 1e-3
+    freeze_blocks_1_to_3: true
+
+  save_dir: outputs/moe_runs
+  save_every: 2
+  device: null
+  amp: true
+  num_workers: 2
+
+# ---- Upgraded Component 7 (MoE mode) ----
+component7_moe:
+  boundary_threshold: 0.7
+  variance_threshold: 0.3
+  num_prompt_points: 5
+
+# ---- Baseline lesion proposer (still available as fallback) ----
+baseline_lesion_proposer:
+  suspicious_class_threshold: 0.55
+  fixed_binary_threshold: null
+  min_region_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  fallback_blend: 0.35
+
+component7_refine:
+  min_area_px: 48
+  opening_iters: 1
+  closing_iters: 1
+  weak_boundary_threshold: 0.45
+  suppress_fp_threshold: 0.85
+  caution_fp_threshold: 0.65
+
+component0:
+  min_resolution_px: 512
+  aspect_ratio_range: [0.7, 1.4]
+  x1024_size: 1024
+  x224_size: 224
+  clahe:
+    clip_limit: 2.0
+    tile_grid_size: [8, 8]
+    default_by_dataset:
+      montgomery: true
+      shenzhen: true
+      tbx11k: false
+      nih_cxr14: false
+
+# ---- Component 10 (report generator) ----
+component10:
+  backend: template            # "template" (deterministic) | "biogpt"
+  model_name: microsoft/BioGPT-Large
+  use_mock: false
+  fall_back_on_unfaithful: true
+  fall_back_on_load_error: true
+
+runtime:
+  device: null

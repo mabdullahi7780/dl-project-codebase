@@ -38,3 +38,11 @@ class BaselineInferenceBundle:
     severity: str | None = None
     evidence_json: dict[str, Any] | None = None
     report_text: str | None = None
+
+    # --- MoE-specific fields (None when running the baseline path) ---
+    pipeline_mode: str = "baseline"  # "baseline" | "moe"
+    routing_weights: torch.Tensor | None = None      # [1, K] expert weights from C3
+    expert_masks_256: list[torch.Tensor] | None = None  # K × [1, 1, 256, 256] per-expert probs
+    mask_fused_256: torch.Tensor | None = None        # [1, 1, 256, 256] fused mask from C6
+    mask_variance_256: torch.Tensor | None = None     # [1, 1, 256, 256] inter-expert variance
+    cavity_mask_256: torch.Tensor | None = None       # [1, 1, 256, 256] Expert 2 cavity mask
