@@ -410,3 +410,4 @@ def build_component1_encoder(config: Component1EncoderConfig | None = None) -> C
 
     lora_targets = inject_lora_modules(backbone, cfg.lora)
     return Component1Encoder(backbone, lora_targets=lora_targets, active_backend=backend)
+        

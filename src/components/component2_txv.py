@@ -172,3 +172,6 @@ def supervised_contrastive_loss(
         return torch.tensor(0.0, device=device, requires_grad=True)
 
     return loss.mean()
+# sd
+#
+#
