@@ -1,0 +1,11 @@
+project_root: /kaggle/working/repo
+external_data_root: /kaggle/input
+datasets:
+  montgomery: /kaggle/input/datasets/iahmedhabib/montgomery/montgomery
+  shenzhen: /kaggle/input/datasets/iahmedhabib/shehzhenn/shenzhen
+  tbx11k: /kaggle/input/datasets/usmanshams/tbx-11/TBX11K
+  nih_cxr14: /kaggle/input/datasets/organizations/nih-chest-xrays/data
+artifacts:
+  notebook_cache: /kaggle/working/component1_runs/notebook_cache
+  processed: /kaggle/working/component1_runs/processed
+  reports: /kaggle/working/component1_runs/reports

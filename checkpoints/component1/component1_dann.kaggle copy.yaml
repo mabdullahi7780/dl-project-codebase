@@ -45,9 +45,9 @@ component1_dann:
     nih_split: null
     nih_metadata_csv: null
     domain_sampling_weights:
-      montgomery: 100.0
-      shenzhen: 20.0
-      tbx11k: 2.0
+      montgomery: 1.0
+      shenzhen: 1.0
+      tbx11k: 1.0
       nih_cxr14: 1.0
     apply_augmentation: true
     augmentation_datasets:
