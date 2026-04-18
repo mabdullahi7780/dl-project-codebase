@@ -39,15 +39,44 @@ import yaml
 KAGGLE_INPUT = Path("/kaggle/input")
 KAGGLE_WORKING = Path("/kaggle/working")
 
-MONTGOMERY_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/montgomery/montgomery"
-SHENZHEN_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/shehzhenn/shenzhen"
-TBX11K_PATH = KAGGLE_INPUT / "datasets/usmanshams/tbx-11/TBX11K"
-NIH_PATH = KAGGLE_INPUT / "datasets/organizations/nih-chest-xrays/data"
-MEDSAM_CKPT_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/medsam-vit-b/medsam_vit_b.pth"
+MONTGOMERY_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/iahmedhabib/montgomery/montgomery",
+    KAGGLE_INPUT / "montgomery/montgomery",
+    KAGGLE_INPUT / "montgomery",
+)
+SHENZHEN_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/iahmedhabib/shehzhenn/shenzhen",
+    KAGGLE_INPUT / "datasets/iahmedhabib/shenzhen/shenzhen",
+    KAGGLE_INPUT / "shenzhen/shenzhen",
+    KAGGLE_INPUT / "shenzhen",
+)
+TBX11K_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/usmanshams/tbx-11/TBX11K",
+    KAGGLE_INPUT / "tbx-11/TBX11K",
+    KAGGLE_INPUT / "TBX11K",
+)
+NIH_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/organizations/nih-chest-xrays/data",
+    KAGGLE_INPUT / "nih-chest-xrays/data",
+    KAGGLE_INPUT / "nih-cxr14",
+)
+MEDSAM_CKPT_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/iahmedhabib/medsam-vit-b/medsam_vit_b.pth",
+    KAGGLE_INPUT / "medsam-vit-b/medsam_vit_b.pth",
+    KAGGLE_INPUT / "medsam/medsam_vit_b.pth",
+)
 
 # Optional inputs: previously trained C1 adapters and C4 decoder
-C1_ADAPTER_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/component1-artifacts/component1_adapters.safetensors"
-C4_DECODER_PATH = KAGGLE_INPUT / "datasets/iahmedhabib/component4-artifacts/component4_mask_decoder.pt"
+C1_ADAPTER_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/iahmedhabib/component1-artifacts/component1_adapters.safetensors",
+    KAGGLE_INPUT / "component1-artifacts/component1_adapters.safetensors",
+    KAGGLE_INPUT / "component1/component1_adapters.safetensors",
+)
+C4_DECODER_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/iahmedhabib/component4-artifacts/component4_mask_decoder.pt",
+    KAGGLE_INPUT / "component4-artifacts/component4_mask_decoder.pt",
+    KAGGLE_INPUT / "component4/component4_mask_decoder.pt",
+)
 
 
 MODE_PRESETS: dict[str, dict[str, object]] = {
@@ -75,6 +104,16 @@ MODE_PRESETS: dict[str, dict[str, object]] = {
 }
 
 ALL_PHASES = ("cache", "pretrain", "joint", "critic")
+
+
+def _resolve_path(env_key: str, candidates: tuple[Path, ...]) -> Path:
+    env_value = os.environ.get(env_key)
+    if env_value:
+        return Path(env_value)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _find_repo_root() -> Path:
@@ -196,13 +235,41 @@ def main() -> None:
 
     print(f"Mode: {args.mode}  preset={preset}  phase={args.phase}")
     print("Kaggle mounts:")
-    montgomery = _check_mount("montgomery", MONTGOMERY_PATH, required=True)
-    shenzhen = _check_mount("shenzhen", SHENZHEN_PATH, required=True)
-    tbx_root = _check_mount("tbx11k", TBX11K_PATH, required=True)
-    nih_root = _check_mount("nih_cxr14", NIH_PATH, required=False)
-    medsam_ckpt = _check_mount("medsam_vit_b", MEDSAM_CKPT_PATH, required=True)
-    c1_adapter = _check_mount("c1_adapter", C1_ADAPTER_PATH, required=False)
-    c4_decoder = _check_mount("c4_decoder", C4_DECODER_PATH, required=False)
+    montgomery = _check_mount(
+        "montgomery",
+        _resolve_path("KAGGLE_MONTGOMERY_PATH", MONTGOMERY_CANDIDATES),
+        required=True,
+    )
+    shenzhen = _check_mount(
+        "shenzhen",
+        _resolve_path("KAGGLE_SHENZHEN_PATH", SHENZHEN_CANDIDATES),
+        required=True,
+    )
+    tbx_root = _check_mount(
+        "tbx11k",
+        _resolve_path("KAGGLE_TBX11K_PATH", TBX11K_CANDIDATES),
+        required=True,
+    )
+    nih_root = _check_mount(
+        "nih_cxr14",
+        _resolve_path("KAGGLE_NIH_PATH", NIH_CANDIDATES),
+        required=False,
+    )
+    medsam_ckpt = _check_mount(
+        "medsam_vit_b",
+        _resolve_path("KAGGLE_MEDSAM_CKPT", MEDSAM_CKPT_CANDIDATES),
+        required=True,
+    )
+    c1_adapter = _check_mount(
+        "c1_adapter",
+        _resolve_path("KAGGLE_C1_ADAPTER", C1_ADAPTER_CANDIDATES),
+        required=False,
+    )
+    c4_decoder = _check_mount(
+        "c4_decoder",
+        _resolve_path("KAGGLE_C4_DECODER", C4_DECODER_CANDIDATES),
+        required=False,
+    )
 
     assert all([montgomery, shenzhen, tbx_root, medsam_ckpt])
 

@@ -105,9 +105,15 @@ def build_models(
     component1_model.loaded_adapter_path = None  # type: ignore[attr-defined]
     adapter_path = component1_cfg.get("adapter_path")
     if adapter_path:
-        loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
-        component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
-        print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
+        try:
+            loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
+            component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
+            print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
+        except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+            print(
+                "WARNING: failed to load Component 1 adapters from "
+                f"{adapter_path!r}; continuing with frozen backbone only. Error: {exc}"
+            )
     component2_model = Component2SoftDomainContext(
         backend=str(component2_cfg.get("backend", "auto")),
         weights=str(component2_cfg.get("weights", "densenet121-res224-all")),
@@ -115,9 +121,15 @@ def build_models(
     component2_model.loaded_routing_head_path = None  # type: ignore[attr-defined]
     routing_head_path = component2_cfg.get("routing_head_path")
     if routing_head_path:
-        loaded_routing_head = component2_model.load_trained_routing_head(routing_head_path)
-        component2_model.loaded_routing_head_path = str(loaded_routing_head)  # type: ignore[attr-defined]
-        print(f"Component 2: loaded routing head from {loaded_routing_head}")
+        try:
+            loaded_routing_head = component2_model.load_trained_routing_head(routing_head_path)
+            component2_model.loaded_routing_head_path = str(loaded_routing_head)  # type: ignore[attr-defined]
+            print(f"Component 2: loaded routing head from {loaded_routing_head}")
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            print(
+                "WARNING: failed to load Component 2 routing head from "
+                f"{routing_head_path!r}; continuing with default routing head. Error: {exc}"
+            )
     component4_model = Component4MedSAM(
         backend=str(component4_cfg.get("backend", "auto")),
         checkpoint_path=component4_cfg.get("checkpoint_path"),
@@ -133,9 +145,15 @@ def build_models(
                 f"{component4_model.active_backend!r}; fine-tuned decoder NOT loaded."
             )
         else:
-            loaded = component4_model.load_trained_decoder(decoder_ckpt)
-            component4_model.loaded_decoder_checkpoint = str(loaded)  # type: ignore[attr-defined]
-            print(f"Component 4: loaded fine-tuned decoder from {loaded}")
+            try:
+                loaded = component4_model.load_trained_decoder(decoder_ckpt)
+                component4_model.loaded_decoder_checkpoint = str(loaded)  # type: ignore[attr-defined]
+                print(f"Component 4: loaded fine-tuned decoder from {loaded}")
+            except (FileNotFoundError, RuntimeError, ValueError) as exc:
+                print(
+                    "WARNING: failed to load Component 4 fine-tuned decoder from "
+                    f"{decoder_ckpt!r}; continuing with base decoder. Error: {exc}"
+                )
     component1_model.eval()
     component2_model.eval()
     component4_model.eval()
