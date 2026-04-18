@@ -39,13 +39,8 @@ class Component2DomainDataset(Component1DomainDataset):
             "source": sample.source
         })
 
-        x_224 = harmonised.x_224
-        # TXV-normalised to [-1024, 1024]
-        # x_224 is [0, 1] float32 from Component 0
-        x_224_txv = (x_224 * 2048.0) - 1024.0
-
         return {
-            "x_224": x_224_txv,
+            "x_224": harmonised.x_224,
             "domain_id": torch.tensor(sample.domain_id, dtype=torch.long),
             "dataset_id": sample.dataset_id,
             "source": sample.source
@@ -191,6 +186,12 @@ def main() -> None:
     seed_everything(seed)
 
     samples = build_component1_manifest(paths_config=args.paths, component1_config=args.component1_config)
+    excluded_datasets = {
+        str(dataset_id).lower()
+        for dataset_id in config["data"].get("exclude_datasets", [])
+    }
+    if excluded_datasets:
+        samples = [sample for sample in samples if sample.dataset_id not in excluded_datasets]
     samples = maybe_limit_manifest(samples, config["training"].get("limit_per_domain"))
     
     train_samples, val_samples = stratified_split(samples, val_ratio=config["data"]["val_split"], seed=seed)

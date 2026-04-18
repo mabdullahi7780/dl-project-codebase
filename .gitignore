@@ -8,7 +8,9 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
-
+.pytest_tmp/
+pytest-cache-files-*/
+component1_nih_eb594ru_/
 # Jupyter
 .ipynb_checkpoints/
 

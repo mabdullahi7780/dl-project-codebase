@@ -29,7 +29,7 @@ from src.components.component3_routing import Component3RoutingGate, RoutingGate
 from src.components.component4_lung import Component4MedSAM
 from src.components.component5_experts import ExpertBank, ExpertDecoderConfig, EXPERT_NAMES
 from src.components.component6_fusion import Component6ExpertFusion, FusionConfig
-from src.components.component7_boundary import score_boundary_quality
+from src.components.component7_boundary import BoundaryScoreBreakdown, score_boundary_quality
 from src.components.component7_fp_auditor import estimate_fp_probability
 from src.components.component7_refine import BaselineRefineConfig, refine_mask
 from src.components.component7_verification import (
@@ -92,6 +92,7 @@ def build_models(
     device: torch.device,
 ) -> tuple[Component1DANNModel, Component2SoftDomainContext, Component4MedSAM]:
     component1_cfg = config.get("component1", {})
+    component2_cfg = config.get("component2", {})
     component4_cfg = config.get("component4", {})
     encoder = build_component1_encoder(
         Component1EncoderConfig(
@@ -108,9 +109,15 @@ def build_models(
         component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
         print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
     component2_model = Component2SoftDomainContext(
-        backend=str(config.get("component2", {}).get("backend", "auto")),
-        weights=str(config.get("component2", {}).get("weights", "densenet121-res224-all")),
+        backend=str(component2_cfg.get("backend", "auto")),
+        weights=str(component2_cfg.get("weights", "densenet121-res224-all")),
     ).to(device)
+    component2_model.loaded_routing_head_path = None  # type: ignore[attr-defined]
+    routing_head_path = component2_cfg.get("routing_head_path")
+    if routing_head_path:
+        loaded_routing_head = component2_model.load_trained_routing_head(routing_head_path)
+        component2_model.loaded_routing_head_path = str(loaded_routing_head)  # type: ignore[attr-defined]
+        print(f"Component 2: loaded routing head from {loaded_routing_head}")
     component4_model = Component4MedSAM(
         backend=str(component4_cfg.get("backend", "auto")),
         checkpoint_path=component4_cfg.get("checkpoint_path"),
@@ -138,7 +145,7 @@ def build_models(
 def build_moe_models(
     config: dict[str, Any],
     device: torch.device,
-) -> tuple[Component3RoutingGate, ExpertBank, Component6ExpertFusion] | None:
+) -> tuple[Component3RoutingGate, ExpertBank, Component6ExpertFusion, Component7BoundaryCritic | None] | None:
     """Build MoE components (C3, C5, C6) if configured.
 
     Returns ``None`` if the MoE path is not enabled in the config, allowing
@@ -154,6 +161,8 @@ def build_moe_models(
     routing_gate = Component3RoutingGate(
         RoutingGateConfig(
             num_experts=num_experts,
+            use_domain_ctx=bool(moe_cfg.get("use_domain_ctx", False)),
+            domain_ctx_dim=int(moe_cfg.get("domain_ctx_dim", 256)),
             temperature=float(moe_cfg.get("routing_temperature", 1.0)),
             top_k=moe_cfg.get("routing_top_k"),
         )
@@ -181,17 +190,32 @@ def build_moe_models(
     if moe_ckpt and Path(moe_ckpt).is_file():
         state = torch.load(moe_ckpt, map_location=device, weights_only=False)
         if "routing_gate" in state:
-            routing_gate.load_state_dict(state["routing_gate"])
+            routing_gate.load_state_dict(state["routing_gate"], strict=False)
         if "expert_bank" in state:
             expert_bank.load_state_dict(state["expert_bank"])
         if "fusion" in state:
             fusion.load_state_dict(state["fusion"])
         print(f"MoE: loaded checkpoint from {moe_ckpt}")
 
+    component7_cfg = config.get("component7_moe", {})
+    boundary_critic: Component7BoundaryCritic | None = None
+    critic_ckpt = component7_cfg.get("boundary_critic_checkpoint")
+    if critic_ckpt:
+        critic_path = Path(critic_ckpt)
+        if critic_path.is_file():
+            boundary_critic = Component7BoundaryCritic().to(device)
+            boundary_critic.load_state_dict(
+                torch.load(critic_path, map_location=device, weights_only=False)
+            )
+            boundary_critic.eval()
+            print(f"Component 7: loaded boundary critic from {critic_path}")
+        else:
+            print(f"WARNING: boundary_critic_checkpoint not found at {critic_path}; using heuristic boundary scorer.")
+
     routing_gate.eval()
     expert_bank.eval()
     fusion.eval()
-    return routing_gate, expert_bank, fusion
+    return routing_gate, expert_bank, fusion, boundary_critic
 
 
 # ---------------------------------------------------------------------------
@@ -279,10 +303,13 @@ def run_single_image_inference(
 
         if use_moe:
             # ===== MoE PATH: C3 → C5 → C6 → C7(upgraded) → C8(upgraded) =====
-            routing_gate, expert_bank, fusion = moe_models
+            routing_gate, expert_bank, fusion, boundary_critic = moe_models
 
             # C3: Routing gate
-            routing_weights = routing_gate(img_emb)  # [B, K]
+            routing_weights = routing_gate(
+                img_emb,
+                txv_output.domain_ctx if routing_gate.use_domain_ctx else None,
+            )  # [B, K]
 
             # C5: All experts
             expert_logits = expert_bank(img_emb)  # list of K × [B, 1, 256, 256]
@@ -296,16 +323,39 @@ def run_single_image_inference(
             cavity_expert_idx = EXPERT_NAMES.index("cavity")
             cavity_mask_256 = fusion_output.expert_masks_256[cavity_expert_idx]  # [B, 1, 256, 256]
 
-            # C7 upgraded: boundary critic (heuristic fallback if no trained critic)
+            # C7 upgraded: keep heuristic diagnostics, but use the trained
+            # critic score when a boundary critic checkpoint is available.
             coarse_mask_256 = (mask_fused_256[0] > 0.5).float()
             lung_mask_256 = lung_output.lung_mask_256[0]
-            boundary = score_boundary_quality(coarse_mask_256, lung_mask_256, x1024)
+            heuristic_boundary = score_boundary_quality(coarse_mask_256, lung_mask_256, x1024)
+            boundary_score = heuristic_boundary.boundary_score
+            if boundary_critic is not None:
+                critic_crop = Component7BoundaryCritic.prepare_crop(
+                    x1024,
+                    coarse_mask_256,
+                    lung_mask_256,
+                ).to(device)
+                boundary_score = float(boundary_critic(critic_crop).item())
+            boundary = BoundaryScoreBreakdown(
+                boundary_score=boundary_score,
+                lesion_fraction=heuristic_boundary.lesion_fraction,
+                spill_fraction=heuristic_boundary.spill_fraction,
+                n_components=heuristic_boundary.n_components,
+                compactness=heuristic_boundary.compactness,
+                edge_alignment=heuristic_boundary.edge_alignment,
+            )
 
             # C7 upgraded: reprompt refinement using Expert 3
             reprompt_refiner = Component7RepromptRefiner(
                 RepromptRefinerConfig(
                     boundary_threshold=float(
                         config.get("component7_moe", {}).get("boundary_threshold", 0.7)
+                    ),
+                    variance_threshold=float(
+                        config.get("component7_moe", {}).get("variance_threshold", 0.3)
+                    ),
+                    num_prompt_points=int(
+                        config.get("component7_moe", {}).get("num_prompt_points", 5)
                     ),
                 )
             )
@@ -491,6 +541,7 @@ def run_single_image_inference(
         "pipeline_mode": pipeline_mode,
         "component1_backend": component1_model.encoder.active_backend,
         "component2_backend": component2_model.active_backend,
+        "component2_routing_head_path": getattr(component2_model, "loaded_routing_head_path", None),
         "component4_backend": component4_model.active_backend,
         "component4_decoder_ckpt": getattr(component4_model, "loaded_decoder_checkpoint", None),
         "component1_adapter_path": getattr(component1_model, "loaded_adapter_path", None),
@@ -500,6 +551,7 @@ def run_single_image_inference(
     if use_moe:
         run_summary["expert_routing"] = expert_routing_dict
         run_summary["moe_checkpoint"] = config.get("moe", {}).get("checkpoint_path")
+        run_summary["boundary_critic_checkpoint"] = config.get("component7_moe", {}).get("boundary_critic_checkpoint")
     else:
         run_summary["selected_classes"] = selected_classes_for_summary
 

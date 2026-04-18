@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -95,6 +96,46 @@ class Component2SoftDomainContext(nn.Module):
         if isinstance(classifier, nn.Linear):
             return classifier.weight.detach()
         return None
+
+    def routing_head_state_dict(self) -> dict[str, torch.Tensor]:
+        return {
+            key: value.detach().cpu().clone()
+            for key, value in self.domain_routing_head.state_dict().items()
+        }
+
+    def load_routing_head_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+        self.domain_routing_head.load_state_dict(state_dict, strict=True)
+
+    def load_trained_routing_head(self, checkpoint_path: str | Path) -> Path:
+        """Load a saved Component 2 routing-head checkpoint."""
+
+        path = Path(checkpoint_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Component 2 routing-head checkpoint not found: {path}")
+
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        state_dict: dict[str, torch.Tensor] | None = None
+
+        if isinstance(payload, dict):
+            nested = payload.get("domain_routing_head")
+            if isinstance(nested, dict) and any(isinstance(v, torch.Tensor) for v in nested.values()):
+                state_dict = {str(k): v for k, v in nested.items() if isinstance(v, torch.Tensor)}
+            else:
+                prefixed = {
+                    key[len("domain_routing_head.") :]: value
+                    for key, value in payload.items()
+                    if key.startswith("domain_routing_head.") and isinstance(value, torch.Tensor)
+                }
+                if prefixed:
+                    state_dict = prefixed
+                elif any(isinstance(v, torch.Tensor) for v in payload.values()):
+                    state_dict = {str(k): v for k, v in payload.items() if isinstance(v, torch.Tensor)}
+
+        if not state_dict:
+            raise ValueError(f"Unrecognised Component 2 routing-head payload at {path}.")
+
+        self.load_routing_head_state_dict(state_dict)
+        return path
 
     def forward_features(self, x_224: torch.Tensor) -> TXVForwardOutput:
         if x_224.ndim != 4 or x_224.shape[1] != 1 or tuple(x_224.shape[2:]) != (224, 224):

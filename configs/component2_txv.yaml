@@ -16,3 +16,4 @@ component2_txv:
     save_name: component2_routing_head.pt
   data:
     val_split: 0.2
+    exclude_datasets: [nih_cxr14]

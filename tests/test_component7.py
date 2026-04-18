@@ -1,30 +1,53 @@
 import torch
-import pytest
-from src.components.component7_verification import Component7aBoundaryCritic, Component7bFPAuditor
 
-def test_component7a():
-    model = Component7aBoundaryCritic()
+from src.components.component7_fp_auditor import estimate_fp_probability
+from src.components.component7_verification import Component7BoundaryCritic
+
+
+def test_component7_boundary_critic() -> None:
+    model = Component7BoundaryCritic()
     x = torch.randn(2, 3, 224, 224)
-    
-    # Check frozen layers
-    assert not next(model.features.parameters()).requires_grad
-    # Check trainable layers
-    assert next(model.fc.parameters()).requires_grad
-    
+
+    frozen = [param.requires_grad for param in next(iter(model.features.children())).parameters()]
+    assert frozen and not any(frozen)
+    assert next(model.head.parameters()).requires_grad
+
     out = model(x)
     assert out.shape == (2, 1)
     assert torch.all(out >= 0) and torch.all(out <= 1)
 
-def test_component7b():
-    model = Component7bFPAuditor(txh_fallback=True)
-    x = torch.randn(2, 1, 224, 224)
-    
-    # Check frozen backbone
-    assert not next(model.backbone.parameters()).requires_grad
-    # Check trainable head
-    assert next(model.fp_head.parameters()).requires_grad
-    
-    fp_prob, concat_feats = model(x)
-    assert concat_feats.shape == (2, 1042)
-    assert fp_prob.shape == (2, 1)
-    assert torch.all(fp_prob >= 0) and torch.all(fp_prob <= 1)
+
+def test_component7_fp_auditor() -> None:
+    lesion_mask = torch.zeros(1, 256, 256)
+    lesion_mask[:, 100:170, 120:180] = 1.0
+    lung_mask = torch.ones(1, 256, 256)
+    pathology_logits = torch.randn(18)
+
+    result = estimate_fp_probability(
+        lesion_mask,
+        lung_mask,
+        pathology_logits,
+        class_names=(
+            "atelectasis",
+            "consolidation",
+            "infiltration",
+            "pneumothorax",
+            "edema",
+            "emphysema",
+            "fibrosis",
+            "effusion",
+            "pneumonia",
+            "pleural_thickening",
+            "cardiomegaly",
+            "nodule",
+            "mass",
+            "hernia",
+            "lung_lesion",
+            "fracture",
+            "lung_opacity",
+            "enlarged_cardiomediastinum",
+        ),
+    )
+
+    assert 0.0 <= result.fp_probability <= 1.0
+    assert isinstance(result.suspicious_probability, float)

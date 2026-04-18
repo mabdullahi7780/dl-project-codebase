@@ -28,6 +28,8 @@ class RoutingGateConfig:
     in_channels: int = 256
     hidden_dim: int = 128
     num_experts: int = 4
+    use_domain_ctx: bool = False
+    domain_ctx_dim: int = 256
     dropout: float = 0.1
     temperature: float = 1.0
     top_k: int | None = None  # None = use all experts
@@ -49,10 +51,16 @@ class Component3RoutingGate(nn.Module):
         super().__init__()
         cfg = config or RoutingGateConfig()
         self.num_experts = cfg.num_experts
+        self.use_domain_ctx = cfg.use_domain_ctx
         self.temperature = cfg.temperature
         self.top_k = cfg.top_k
 
         self.pool = nn.AdaptiveAvgPool2d(1)
+        self.domain_proj = (
+            nn.Linear(cfg.domain_ctx_dim, cfg.in_channels)
+            if cfg.use_domain_ctx
+            else None
+        )
 
         self.gate = nn.Sequential(
             nn.Linear(cfg.in_channels, cfg.hidden_dim),
@@ -61,7 +69,11 @@ class Component3RoutingGate(nn.Module):
             nn.Linear(cfg.hidden_dim, cfg.num_experts),
         )
 
-    def forward(self, img_emb: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        img_emb: torch.Tensor,
+        domain_ctx: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         Args:
             img_emb: [B, 256, 64, 64] from Component 1 encoder.
@@ -75,6 +87,18 @@ class Component3RoutingGate(nn.Module):
             )
 
         pooled = self.pool(img_emb).flatten(1)  # [B, 256]
+        if self.domain_proj is not None:
+            if domain_ctx is None:
+                raise ValueError("RoutingGate configured with use_domain_ctx=True but no domain_ctx was provided.")
+            if domain_ctx.ndim != 2:
+                raise ValueError(
+                    f"RoutingGate expects domain_ctx [B, D], got ndim={domain_ctx.ndim}."
+                )
+            if domain_ctx.shape[0] != pooled.shape[0]:
+                raise ValueError(
+                    f"RoutingGate batch mismatch: pooled batch={pooled.shape[0]} vs domain_ctx batch={domain_ctx.shape[0]}."
+                )
+            pooled = pooled + self.domain_proj(domain_ctx)
         logits = self.gate(pooled)               # [B, K]
 
         # Temperature-scaled softmax

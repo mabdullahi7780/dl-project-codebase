@@ -68,8 +68,12 @@ class BoundaryCriticDataset(Dataset):
     def __init__(self, cache_dir: Path | None = None, num_synthetic: int = 200) -> None:
         self.cache_dir = cache_dir
         self.corruption_modes = ["shift", "dilate", "holes"]
-        if cache_dir is not None and cache_dir.exists():
+        if cache_dir is not None:
+            if not cache_dir.exists():
+                raise FileNotFoundError(f"MoE cache directory not found: {cache_dir}")
             self.samples = sorted(cache_dir.glob("*.pt"))
+            if not self.samples:
+                raise FileNotFoundError(f"MoE cache directory is empty: {cache_dir}")
         else:
             self.samples = list(range(num_synthetic))
 
@@ -121,13 +125,19 @@ def train_boundary_critic(config: dict[str, Any], *, cache_dir: Path | None = No
 
     critic = Component7BoundaryCritic(
         BoundaryCriticConfig(
-            pretrained=True,
+            pretrained=bool(train_cfg.get("pretrained", False)),
             freeze_blocks_1_to_3=bool(train_cfg.get("freeze_blocks_1_to_3", True)),
         )
     ).to(device)
 
     dataset = BoundaryCriticDataset(cache_dir=cache_dir)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=int(config.get("moe_training", {}).get("num_workers", 2)),
+        pin_memory=True,
+    )
 
     trainable = [p for p in critic.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=lr, weight_decay=1e-4)

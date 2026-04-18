@@ -132,6 +132,7 @@ def _write_moe_config(
     cfg["moe_training"]["joint"]["epochs"] = int(preset["joint_epochs"])
     cfg["moe_training"]["joint"]["batch_size"] = int(preset["batch_size"])
     cfg["moe_training"]["boundary_critic"]["epochs"] = int(preset["critic_epochs"])
+    cfg.setdefault("component7_moe", {})["boundary_critic_checkpoint"] = str(save_dir / "boundary_critic.pt")
 
     out = save_dir / "moe.kaggle.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)

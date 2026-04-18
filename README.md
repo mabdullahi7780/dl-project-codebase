@@ -1,46 +1,51 @@
-# TB CXR Baseline
+# TB CXR Pipeline
 
-This repository follows the baseline-first structure described in `plan.md`.
+This repo is no longer just `Component 0 + Component 1`.
 
-Current implementation status:
+Current state:
 
-- full directory scaffold is in place
-- Component 0 (`QC + normalisation`) is implemented
-- Component 1 (`shared image encoder + LoRA + DANN head`) is implemented
-- a companion notebook lives in `notebooks/component0_qc.ipynb`
-- a companion notebook lives in `notebooks/component1_dann.ipynb`
-- tests for Component 0 live in `tests/test_component0.py`
-- tests for Component 1 live in `tests/test_component1.py`
+- Baseline path is implemented end to end: `C0 -> C1 -> C2 -> C4 -> baseline lesion proposer -> C7 heuristics -> C8 -> C9 -> C10`
+- MoE path is implemented in code: `C3 routing -> C5 experts -> C6 fusion -> upgraded C7 -> upgraded C8`
+- Component 1 LoRA+DANN and Component 4 lung decoder already have real training scripts and checkpoint hooks
+- The MoE stack now supports a grounded 3-dataset cache workflow for `TBX11K + Montgomery + Shenzhen`
 
-The core preprocessing logic is intentionally kept in `src/components/component0_qc.py`.
-The core Component 1 logic is intentionally kept in `src/components/component1_encoder.py`,
-`src/components/component1_dann.py`, and `src/training/train_component1_dann.py`.
-The notebooks are for inspection and manual runs against datasets stored on an external HDD.
+## What Is Implemented
 
-## Environment
-
-- Python `3.11`
-- PyTorch-based preprocessing pipeline
-- OpenCV is used for CLAHE
-
-Install the dependencies from `requirements.txt`, then open the notebook or import the module directly.
-
-## External datasets
-
-The notebook is written so dataset roots can point to an external drive, for example `E:\datasets`.
-You can also store those paths in environment variables or in `configs/paths.yaml`.
-
-## Implemented files
-
-- `src/core/types.py`
-- `src/core/constants.py`
-- `src/data/transforms_qc.py`
-- `src/data/harmonise.py`
 - `src/components/component0_qc.py`
-- `src/components/component1_encoder.py`
-- `src/components/component1_dann.py`
-- `src/training/train_component1_dann.py`
-- `tests/test_component0.py`
-- `tests/test_component1.py`
-- `notebooks/component0_qc.ipynb`
-- `notebooks/component1_dann.ipynb`
+  Harmonisation, CLAHE policy, `x_1024`, `x_224`, `x_3ch`
+- `src/components/component1_encoder.py`, `src/components/component1_dann.py`
+  MedSAM encoder wrapper, LoRA, DANN
+- `src/components/component2_txv.py`
+  TXV pathology features plus optional trainable routing head
+- `src/components/component4_lung.py`
+  Lung segmentation with fine-tunable decoder
+- `src/components/component3_routing.py`
+  MoE routing gate, now with optional `domain_ctx` conditioning
+- `src/components/component5_experts.py`
+  Four pathology experts: `consolidation`, `cavity`, `fibrosis`, `nodule`
+- `src/components/component6_fusion.py`
+  Weighted expert fusion and variance map
+- `src/components/component7_verification.py`
+  Boundary critic and reprompt refiner
+- `src/app/infer.py`
+  Dual baseline/MoE inference entry point
+
+## MoE Training Order
+
+1. Train `Component 1` adapters if needed.
+2. Train `Component 4` lung decoder if needed.
+3. Build the MoE cache with `scripts/cache_moe_embeddings.py`.
+4. Pretrain experts with `python -m src.training.train_experts --config configs/moe.yaml --cache-dir <cache> --all`.
+5. Joint-train the MoE with `python -m src.training.train_moe_joint --config configs/moe.yaml --cache-dir <cache>`.
+6. Train the boundary critic with `python -m src.training.train_boundary_critic --config configs/moe.yaml --cache-dir <cache>`.
+
+## Kaggle
+
+Use `scripts/kaggle_moe_train.py` for the Kaggle bootstrap. It expects the same dataset mount style already used for Component 1 training and runs:
+
+- cache
+- expert pretraining
+- joint MoE training
+- boundary critic training
+
+The cache path intentionally excludes `NIH` for now and focuses on `TBX11K`, `Montgomery`, and `Shenzhen`.

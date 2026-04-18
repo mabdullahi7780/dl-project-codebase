@@ -32,7 +32,7 @@ import torchvision.models as models
 
 @dataclass(slots=True)
 class BoundaryCriticConfig:
-    pretrained: bool = True
+    pretrained: bool = False
     freeze_blocks_1_to_3: bool = True
     input_size: int = 224
     threshold: float = 0.5
@@ -139,6 +139,7 @@ class RepromptRefinerConfig:
     variance_threshold: float = 0.3
     num_prompt_points: int = 5
     dice_improvement_threshold: float = 0.0
+    min_accept_dice_to_fused: float = 0.6
 
 
 class Component7RepromptRefiner(nn.Module):
@@ -267,11 +268,14 @@ class Component7RepromptRefiner(nn.Module):
             if lung_mask_256 is not None:
                 refined_prob = refined_prob * (lung_mask_256[b: b + 1] > 0.5).float()
 
-            # Arbiter: accept only if Dice improves
-            original_dice = self._pixel_dice(mask_fused_256[b], mask_fused_256[b])
+            # Arbiter: without ground truth at inference time, require the
+            # refined mask to remain sufficiently consistent with the fused mask.
             refined_dice = self._pixel_dice(refined_prob[0], mask_fused_256[b])
 
-            if refined_dice > original_dice + self.cfg.dice_improvement_threshold:
+            if refined_dice >= max(
+                self.cfg.min_accept_dice_to_fused,
+                self.cfg.dice_improvement_threshold,
+            ):
                 refined_list.append(refined_prob)
             else:
                 refined_list.append(mask_fused_256[b: b + 1])

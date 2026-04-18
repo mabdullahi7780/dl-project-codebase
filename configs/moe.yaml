@@ -14,6 +14,7 @@ component1:
 component2:
   backend: auto
   weights: densenet121-res224-all
+  routing_head_path: null
   pathology_flag_threshold: 0.6
 
 component4:
@@ -30,6 +31,8 @@ moe:
   checkpoint_path: checkpoints/moe/moe_checkpoint.pt
 
   # Component 3 — Routing Gate
+  use_domain_ctx: false
+  domain_ctx_dim: 256
   routing_temperature: 1.0
   routing_top_k: null  # null = soft MoE (all experts), set 2 for sparse
 
@@ -64,6 +67,7 @@ moe_training:
     scheduler: cosine
     warmup_epochs: 2
     load_balance_weight: 0.1    # auxiliary loss weight for routing balance
+    expert_aux_weight: 0.25
     mask_loss: bce_dice          # "bce_dice" | "bce" | "dice"
     grl_weight: 0.0              # domain loss (0 = not used in MoE phase)
 
@@ -72,6 +76,7 @@ moe_training:
     epochs: 5
     batch_size: 16
     lr: 1e-3
+    pretrained: false
     freeze_blocks_1_to_3: true
 
   save_dir: outputs/moe_runs
@@ -85,6 +90,10 @@ component7_moe:
   boundary_threshold: 0.7
   variance_threshold: 0.3
   num_prompt_points: 5
+  boundary_critic_checkpoint: null
+
+moe_cache:
+  pseudo_threshold: 0.45
 
 # ---- Baseline lesion proposer (still available as fallback) ----
 baseline_lesion_proposer:

@@ -24,27 +24,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 from torch.utils.data import DataLoader, Dataset
-
-from src.components.component1_encoder import (
-    Component1EncoderConfig,
-    build_component1_encoder,
-    load_trainable_state_dict,
-)
-from src.components.component1_dann import Component1DANNModel, DANNHead
-from src.components.component5_experts import (
-    ExpertBank,
-    ExpertDecoderConfig,
-    EXPERT_NAMES,
-    LightweightExpertDecoder,
-)
+from src.components.component5_experts import EXPERT_NAMES, LightweightExpertDecoder
 from src.core.device import pick_device
-from src.core.seed import seed_everything
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +41,7 @@ def bce_dice_loss(
     target: torch.Tensor,
     *,
     bce_weight: float = 0.5,
+    sample_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Combined BCE + Dice loss for mask prediction.
 
@@ -64,15 +50,21 @@ def bce_dice_loss(
         target:      [B, 1, H, W] binary ground truth in {0, 1}.
         bce_weight:  weight for BCE term (Dice gets 1 - bce_weight).
     """
-    bce = F.binary_cross_entropy_with_logits(pred_logits, target)
+    bce = F.binary_cross_entropy_with_logits(pred_logits, target, reduction="none")
+    bce = bce.mean(dim=(1, 2, 3))
 
     pred_prob = torch.sigmoid(pred_logits)
     intersection = (pred_prob * target).sum(dim=(2, 3))
     union = pred_prob.sum(dim=(2, 3)) + target.sum(dim=(2, 3))
     dice = 1.0 - (2.0 * intersection + 1e-6) / (union + 1e-6)
-    dice = dice.mean()
+    dice = dice.mean(dim=1)
 
-    return bce_weight * bce + (1.0 - bce_weight) * dice
+    loss_per_sample = bce_weight * bce + (1.0 - bce_weight) * dice
+    if sample_weight is None:
+        return loss_per_sample.mean()
+
+    weights = sample_weight.float().view(-1)
+    return (loss_per_sample * weights).sum() / weights.sum().clamp_min(1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -80,19 +72,11 @@ def bce_dice_loss(
 # ---------------------------------------------------------------------------
 
 class ExpertPretrainDataset(Dataset):
-    """Generates (image_embedding, target_mask) pairs for expert pretraining.
+    """Loads per-expert targets from the MoE cache.
 
-    For now this is a placeholder that generates synthetic targets.  In a
-    real run you would:
-
-    1. Pre-compute and cache Component 1 image embeddings for the training
-       set (frozen MedSAM ViT-B forward pass).
-    2. Generate per-pathology pseudo-ground-truth masks from TBX11K bboxes
-       or from TXV Grad-CAM maps thresholded per class.
-    3. Load those cached embeddings and targets here.
-
-    The ``--cache-dir`` flag points to the directory of pre-computed
-    embeddings.
+    Synthetic data is kept only for smoke tests when ``cache_dir`` is omitted.
+    If a cache directory is explicitly provided, it must exist and contain
+    the new MoE cache payloads.
     """
 
     def __init__(
@@ -105,10 +89,13 @@ class ExpertPretrainDataset(Dataset):
         self.expert_name = expert_name
         self.cache_dir = cache_dir
 
-        if cache_dir is not None and cache_dir.exists():
+        if cache_dir is not None:
+            if not cache_dir.exists():
+                raise FileNotFoundError(f"MoE cache directory not found: {cache_dir}")
             self.samples = sorted(cache_dir.glob("*.pt"))
+            if not self.samples:
+                raise FileNotFoundError(f"MoE cache directory is empty: {cache_dir}")
         else:
-            # Synthetic fallback for smoke testing
             self.samples = list(range(num_synthetic))
 
     def __len__(self) -> int:
@@ -117,9 +104,17 @@ class ExpertPretrainDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         if isinstance(self.samples[idx], Path):
             data = torch.load(self.samples[idx], weights_only=False)
+            expert_masks = data.get("expert_masks")
+            if not isinstance(expert_masks, dict) or self.expert_name not in expert_masks:
+                raise KeyError(
+                    f"Cache sample {self.samples[idx]} does not contain expert_masks[{self.expert_name!r}]."
+                )
+            expert_weights = data.get("expert_supervision_weights", {})
+            weight = expert_weights.get(self.expert_name, data.get("supervision_weight", 1.0))
             return {
-                "image_emb": data["image_emb"],       # [256, 64, 64]
-                "target_mask": data["target_mask"],     # [1, 256, 256]
+                "image_emb": data["image_emb"].float(),
+                "target_mask": expert_masks[self.expert_name].float(),
+                "sample_weight": torch.tensor(float(weight), dtype=torch.float32),
             }
 
         # Synthetic: random embedding + random blob mask
@@ -133,7 +128,11 @@ class ExpertPretrainDataset(Dataset):
         )
         blob = ((xx - cx).float() / rx) ** 2 + ((yy - cy).float() / ry) ** 2
         mask[0] = (blob < 1.0).float()
-        return {"image_emb": emb, "target_mask": mask}
+        return {
+            "image_emb": emb,
+            "target_mask": mask,
+            "sample_weight": torch.tensor(1.0, dtype=torch.float32),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +176,7 @@ def train_single_expert(
         shuffle=True,
         num_workers=int(config.get("moe_training", {}).get("num_workers", 2)),
         pin_memory=True,
-        drop_last=True,
+        drop_last=False,
     )
 
     optimizer = torch.optim.AdamW(expert.parameters(), lr=lr, weight_decay=float(train_cfg.get("weight_decay", 1e-4)))
@@ -199,10 +198,11 @@ def train_single_expert(
         for batch in loader:
             emb = batch["image_emb"].to(device)
             target = batch["target_mask"].to(device)
+            sample_weight = batch["sample_weight"].to(device)
 
             with torch.amp.autocast("cuda", enabled=use_amp and device.type == "cuda"):
                 pred_logits = expert(emb)
-                loss = bce_dice_loss(pred_logits, target)
+                loss = bce_dice_loss(pred_logits, target, sample_weight=sample_weight)
 
             optimizer.zero_grad()
             scaler.scale(loss).backward()
