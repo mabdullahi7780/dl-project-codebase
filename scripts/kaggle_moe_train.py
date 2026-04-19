@@ -28,6 +28,7 @@ Typical Kaggle cells::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -296,23 +297,53 @@ def main() -> None:
     os.chdir(repo_root)
 
     cache_dir = Path(args.cache_dir) if args.cache_dir else (save_dir / "embedding_cache")
+    cache_meta_path = cache_dir / "cache_meta.json"
 
     phases_to_run = ALL_PHASES if args.phase == "all" else (args.phase,)
 
     # ---- Phase 0: cache embeddings ----
-    if "cache" in phases_to_run and not cache_dir.exists():
-        print(f"\n=== Phase 0: cache embeddings → {cache_dir} ===")
-        sys.argv = [
-            "cache_moe_embeddings.py",
-            "--config", str(config_path),
-            "--paths", str(paths_path),
-            "--output", str(cache_dir),
-            "--limit-per-domain", str(preset["limit_per_domain"]),
-        ]
-        from scripts.cache_moe_embeddings import main as cache_main
-        cache_main()
-    elif "cache" in phases_to_run:
-        print(f"\n=== Phase 0: cache exists at {cache_dir}, skipping ===")
+    def _cache_is_reusable() -> tuple[bool, str]:
+        if not cache_dir.exists():
+            return False, "cache dir does not exist"
+        if not cache_meta_path.exists():
+            return False, "cache has no cache_meta.json (legacy or partial build)"
+        try:
+            meta = json.loads(cache_meta_path.read_text())
+        except Exception as exc:
+            return False, f"cache_meta.json unreadable ({exc})"
+        cached_limit = meta.get("limit_per_domain")
+        wanted_limit = preset["limit_per_domain"]
+        if wanted_limit is None:
+            return True, f"reusing cache (any size accepted); meta={meta}"
+        if not isinstance(cached_limit, int) or cached_limit < int(wanted_limit):
+            return False, (
+                f"cache was built for limit_per_domain={cached_limit} but current "
+                f"mode '{args.mode}' needs {wanted_limit}"
+            )
+        return True, f"reusing cache (limit_per_domain={cached_limit} >= {wanted_limit})"
+
+    if "cache" in phases_to_run:
+        reusable, reason = _cache_is_reusable()
+        if reusable:
+            print(f"\n=== Phase 0: {reason} at {cache_dir} ===")
+        else:
+            if cache_dir.exists():
+                print(f"\n=== Phase 0: rebuilding cache ({reason}) ===")
+                shutil.rmtree(cache_dir)
+            print(f"=== Phase 0: cache embeddings → {cache_dir} ===")
+            sys.argv = [
+                "cache_moe_embeddings.py",
+                "--config", str(config_path),
+                "--paths", str(paths_path),
+                "--output", str(cache_dir),
+                "--limit-per-domain", str(preset["limit_per_domain"]),
+            ]
+            from scripts.cache_moe_embeddings import main as cache_main
+            cache_main()
+            cache_meta_path.write_text(json.dumps({
+                "mode": args.mode,
+                "limit_per_domain": preset["limit_per_domain"],
+            }, indent=2))
 
     # ---- Phase 1: expert pretraining ----
     if "pretrain" in phases_to_run:

@@ -28,7 +28,7 @@ component4:
 moe:
   enabled: true
   num_experts: 4
-  checkpoint_path: checkpoints/moe/moe_checkpoint.pt
+  checkpoint_path: checkpoints/component_moe/moe_best.pt
 
   # Component 3 — Routing Gate
   use_domain_ctx: false
@@ -90,7 +90,7 @@ component7_moe:
   boundary_threshold: 0.7
   variance_threshold: 0.3
   num_prompt_points: 5
-  boundary_critic_checkpoint: null
+  boundary_critic_checkpoint: checkpoints/component_moe/boundary_critic.pt
 
 moe_cache:
   pseudo_threshold: 0.45
