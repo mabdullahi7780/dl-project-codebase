@@ -1,0 +1,62 @@
+component1_dann:
+  encoder:
+    backend: auto
+    checkpoint_path: ${MEDSAM_VIT_B_CKPT:-checkpoints/medsam/medsam_vit_b.pth}
+    freeze_backbone: true
+    input_size: 1024
+    patch_size: 16
+    embed_dim: 256
+    depth: 2
+    num_heads: 8
+    mlp_ratio: 4.0
+  lora:
+    rank: 4
+    alpha: 16.0
+    dropout: 0.05
+    target_modules:
+    - qkv
+  dann_head:
+    input_dim: 256
+    hidden_dim: 128
+    num_domains: 4
+    dropout: 0.3
+  training:
+    seed: 1337
+    device: null
+    epochs: 20
+    batch_size: 4
+    num_workers: 0
+    grl_ramp_epochs: 10
+    max_lambda: 1.0
+    lr_lora: 0.0001
+    lr_dann: 0.001
+    weight_decay: 0.0001
+    limit_per_domain: null
+    amp: true
+    save_every: 1
+    resume_checkpoint: null
+    save_dir: ${COMPONENT1_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component1}
+    save_name: component1_dann_full.pt
+    adapter_save_name: lora_adapters.safetensors
+    save_full_checkpoint: false
+  data:
+    manifest_cache: /kaggle/working/component2_runs/nih_index_cache.json
+    tbx_list: all_trainval.txt
+    nih_split: null
+    nih_metadata_csv: null
+    domain_sampling_weights:
+      montgomery: 1.0
+      shenzhen: 1.0
+      tbx11k: 1.0
+      nih_cxr14: 1.0
+    apply_augmentation: true
+    augmentation_datasets:
+    - montgomery
+    - shenzhen
+    gamma_range:
+    - 0.7
+    - 1.4
+    poisson_peaks:
+    - 32.0
+    - 64.0
+    - 128.0
