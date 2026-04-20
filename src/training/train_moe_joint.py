@@ -133,6 +133,8 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
     lr_fusion = float(train_cfg.get("lr_fusion", 1e-4))
     lb_weight = float(train_cfg.get("load_balance_weight", 0.1))
     expert_aux_weight = float(train_cfg.get("expert_aux_weight", 0.25))
+    gate_only = bool(train_cfg.get("gate_only", False))
+    resume_from = train_cfg.get("resume_from_moe_best")
     save_dir = Path(config.get("moe_training", {}).get("save_dir", "outputs/moe_runs"))
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -175,14 +177,42 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
             )
             print(f"  Loaded pretrained expert: {name} from {pretrained}")
 
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": routing_gate.parameters(), "lr": lr_gate},
-            {"params": expert_bank.parameters(), "lr": lr_experts},
-            {"params": fusion.parameters(), "lr": lr_fusion},
-        ],
-        weight_decay=float(train_cfg.get("weight_decay", 1e-4)),
-    )
+    # Optional: resume from a previously-trained moe_best.pt so the expert bank
+    # and fusion match the production checkpoint exactly (gate_only retraining).
+    if resume_from:
+        ckpt_path = Path(resume_from)
+        if ckpt_path.is_file():
+            state = torch.load(ckpt_path, map_location=device, weights_only=False)
+            if "routing_gate" in state:
+                routing_gate.load_state_dict(state["routing_gate"], strict=False)
+            if "expert_bank" in state:
+                expert_bank.load_state_dict(state["expert_bank"])
+            if "fusion" in state:
+                fusion.load_state_dict(state["fusion"])
+            print(f"  Resumed MoE components from {ckpt_path}")
+        else:
+            print(f"  WARNING: resume_from_moe_best not found at {ckpt_path}; starting from pretrained experts.")
+
+    if gate_only:
+        for p in expert_bank.parameters():
+            p.requires_grad_(False)
+        for p in fusion.parameters():
+            p.requires_grad_(False)
+        optimizer = torch.optim.AdamW(
+            routing_gate.parameters(),
+            lr=lr_gate,
+            weight_decay=float(train_cfg.get("weight_decay", 1e-4)),
+        )
+        print("  gate_only=True → expert_bank and fusion frozen; only routing_gate will update.")
+    else:
+        optimizer = torch.optim.AdamW(
+            [
+                {"params": routing_gate.parameters(), "lr": lr_gate},
+                {"params": expert_bank.parameters(), "lr": lr_experts},
+                {"params": fusion.parameters(), "lr": lr_fusion},
+            ],
+            weight_decay=float(train_cfg.get("weight_decay", 1e-4)),
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     loader = DataLoader(
@@ -209,8 +239,12 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
 
     for epoch in range(epochs):
         routing_gate.train()
-        expert_bank.train()
-        fusion.train()
+        if gate_only:
+            expert_bank.eval()
+            fusion.eval()
+        else:
+            expert_bank.train()
+            fusion.train()
 
         running = {"mask_loss": 0.0, "expert_loss": 0.0, "lb_loss": 0.0, "total": 0.0}
         n_batches = 0
@@ -237,15 +271,18 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
                     sample_weight=sample_weight,
                 )
 
-                expert_loss_terms = [
-                    bce_dice_loss(
-                        expert_logits[i],
-                        expert_target[:, i],
-                        sample_weight=expert_weight[:, i],
-                    )
-                    for i in range(num_experts)
-                ]
-                expert_loss = torch.stack(expert_loss_terms).mean()
+                if gate_only:
+                    expert_loss = torch.tensor(0.0, device=device)
+                else:
+                    expert_loss_terms = [
+                        bce_dice_loss(
+                            expert_logits[i],
+                            expert_target[:, i],
+                            sample_weight=expert_weight[:, i],
+                        )
+                        for i in range(num_experts)
+                    ]
+                    expert_loss = torch.stack(expert_loss_terms).mean()
 
                 lb_loss = routing_load_balance_loss(routing_weights, num_experts=num_experts)
                 total_loss = mask_loss + (expert_aux_weight * expert_loss) + (lb_weight * lb_loss)
