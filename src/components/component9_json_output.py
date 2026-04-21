@@ -1,6 +1,31 @@
 import json
 from typing import Dict, Any
 
+
+def _validate_evidence_report(output: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate the output dict against the EvidenceReport Pydantic schema.
+
+    Returns the validated dict (re-serialised via model_dump) so callers
+    always receive a schema-conforming structure.  Import is deferred to
+    keep component9_json_output importable even if pydantic is missing
+    (though pydantic>=2.0 is listed in requirements.txt).
+    """
+    try:
+        from src.components.component9_schema import EvidenceReport
+        validated = EvidenceReport.from_component9_dict(output).model_dump()
+        # Re-apply original ALP capitalisation so downstream code is unaffected
+        if "scoring" in validated and "alp" in validated["scoring"]:
+            validated["scoring"]["ALP"] = validated["scoring"].pop("alp")
+        # Restore int cavity_flag (Pydantic converts to bool; keep legacy int)
+        if "scoring" in validated and "cavity_flag" in validated["scoring"]:
+            validated["scoring"]["cavity_flag"] = int(validated["scoring"]["cavity_flag"])
+        return validated
+    except Exception as exc:  # pragma: no cover — only fires on schema mismatch
+        raise ValueError(
+            f"Component 9 JSON failed schema validation: {exc}\nPayload: {output}"
+        ) from exc
+
+
 def generate_structured_json(
     patient_id: str,
     modality: str,
@@ -49,8 +74,8 @@ def generate_structured_json(
         },
         "pathology_flags": pathology_flags
     }
-    
-    return output
+
+    return _validate_evidence_report(output)
 
 def save_structured_json(output_dict: Dict[str, Any], filepath: str) -> None:
     """Save the JSON payload to disk."""

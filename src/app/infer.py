@@ -42,6 +42,7 @@ from src.components.component9_json_output import generate_structured_json, save
 from src.core.device import describe_device, pick_device
 from src.core.seed import seed_everything
 from src.core.types import BaselineInferenceBundle
+from src.utils.checkpoints import compute_file_sha256
 from src.utils.morphology import connected_component_stats
 from src.utils.visualization import save_mask_png, save_overlay_png
 
@@ -552,6 +553,27 @@ def run_single_image_inference(
     save_structured_json(evidence_json, str(outdir / "evidence.json"))
     (outdir / "report.txt").write_text(report_text, encoding="utf-8")
 
+    # --- Checkpoint provenance: compute SHA-256 for every loaded checkpoint ---
+    _provenance_candidates: dict[str, str | None] = {
+        "component1_backbone": config.get("component1", {}).get("checkpoint_path"),
+        "component1_adapter": getattr(component1_model, "loaded_adapter_path", None),
+        "component2_routing_head": getattr(component2_model, "loaded_routing_head_path", None),
+        "component4_backbone": config.get("component4", {}).get("checkpoint_path"),
+        "component4_decoder": getattr(component4_model, "loaded_decoder_checkpoint", None),
+    }
+    if use_moe:
+        _provenance_candidates["moe_checkpoint"] = config.get("moe", {}).get("checkpoint_path")
+        _provenance_candidates["boundary_critic"] = config.get("component7_moe", {}).get("boundary_critic_checkpoint")
+
+    checkpoint_provenance: dict[str, str] = {}
+    for ckpt_name, ckpt_path in _provenance_candidates.items():
+        if ckpt_path is None:
+            continue
+        try:
+            checkpoint_provenance[ckpt_name] = compute_file_sha256(ckpt_path)
+        except FileNotFoundError:
+            checkpoint_provenance[ckpt_name] = "file-not-found"
+
     run_summary: dict[str, Any] = {
         "image": str(image_path),
         "dataset": dataset,
@@ -565,6 +587,7 @@ def run_single_image_inference(
         "component1_adapter_path": getattr(component1_model, "loaded_adapter_path", None),
         "boundary_score": boundary.boundary_score,
         "fp_probability": fp_audit.fp_probability,
+        "checkpoint_provenance": checkpoint_provenance,
     }
     if use_moe:
         run_summary["expert_routing"] = expert_routing_dict

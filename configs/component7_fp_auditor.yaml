@@ -1,5 +1,33 @@
+# Component 7 — FP Auditor default parameters
+#
+# These defaults mirror the hard-coded values in
+# src/components/component7_fp_auditor.py so configs can override them
+# without modifying source code.
+#
+# Field descriptions:
+#   tiny_penalty_threshold     – lesion fractions below this value are penalised
+#                                as likely artefacts (stray pixels, scanner noise).
+#   max_noisy_components       – connected-component counts above this threshold
+#                                accumulate a "noisy" FP penalty.
+#   noisy_penalty_scale        – denominator for the per-extra-component penalty.
+#   unsupported_area_threshold – lesion fractions above this value are treated as
+#                                unrealistically large and penalised.
+#   weights:
+#     pathology_weight         – weight of the TXV suspicious-probability term.
+#     tiny_weight              – weight of the tiny-region penalty term.
+#     noisy_weight             – weight of the noisy-components penalty term.
+#     spill_weight             – weight of the lung-spill penalty term.
+#     unsupported_weight       – weight of the unrealistically-large-area penalty.
+
 component7_fp_auditor:
-  status: placeholder
-  notes:
-    - reserved for the Component 7 false-positive auditor training scaffold
-    - intentionally not implemented in this pass
+  tiny_penalty_threshold: 0.002
+  max_noisy_components: 3
+  noisy_penalty_scale: 5.0
+  unsupported_area_threshold: 0.7
+
+  weights:
+    pathology_weight: 0.45
+    tiny_weight: 0.20
+    noisy_weight: 0.15
+    spill_weight: 0.10
+    unsupported_weight: 0.10

@@ -1,0 +1,50 @@
+# Component 7 — Boundary Critic and Boundary Score defaults
+#
+# boundary_score:
+#   Parameters used by src/components/component7_boundary.py::score_boundary_quality.
+#   Weights must sum to 1.0.
+#
+# boundary_critic:
+#   Parameters for src/components/component7_verification.py::Component7BoundaryCritic
+#   (ResNet18 binary classifier, trained separately via train_boundary_critic).
+#
+# reprompt_refiner:
+#   Parameters for Component7RepromptRefiner (Expert-3 guided mask refinement).
+
+# ---------------------------------------------------------------------------
+# Heuristic boundary scorer (component7_boundary.py)
+# ---------------------------------------------------------------------------
+boundary_score:
+  # Weights for each sub-score in the final weighted sum
+  edge_alignment_weight: 0.25
+  compactness_weight: 0.25
+  component_score_weight: 0.20
+  spill_score_weight: 0.20
+  area_score_weight: 0.10
+
+  # Thresholds for sub-score computation
+  max_components_before_penalty: 3
+  per_extra_component_penalty: 0.15
+  area_fraction_min: 0.001
+  area_fraction_max: 0.60
+  poor_area_score: 0.35
+  max_edge_alignment: 2.0   # normalisation cap for boundary_grad / lung_grad ratio
+
+# ---------------------------------------------------------------------------
+# ResNet18 Boundary Critic (component7_verification.py)
+# ---------------------------------------------------------------------------
+boundary_critic:
+  pretrained: false           # do not use ImageNet weights; train from scratch on CXR crops
+  freeze_blocks_1_to_3: true  # keep conv1+layer1+layer2+layer3 frozen during fine-tuning
+  input_size: 224             # centre-crop size (pixels)
+  threshold: 0.5              # binary decision boundary for boundary_score → "good"
+
+# ---------------------------------------------------------------------------
+# Reprompt Refiner (component7_verification.py)
+# ---------------------------------------------------------------------------
+reprompt_refiner:
+  boundary_threshold: 0.7             # trigger refinement when boundary_score < this
+  variance_threshold: 0.3             # minimum inter-expert variance to qualify a point
+  num_prompt_points: 5                # number of SAM-style prompt points to sample
+  dice_improvement_threshold: 0.0     # accept refined mask when dice >= this vs fused
+  min_accept_dice_to_fused: 0.6       # hard lower bound on acceptance dice

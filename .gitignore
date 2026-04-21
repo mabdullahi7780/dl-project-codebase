@@ -49,3 +49,5 @@ checkpoints/component1/last_*.pt
 !checkpoints/txv/.gitkeep
 !checkpoints/baseline/.gitkeep
 !checkpoints/reports/.gitkeep
+
+.claude

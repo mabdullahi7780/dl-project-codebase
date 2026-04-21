@@ -1,9 +1,41 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+
+def compute_file_sha256(path: str | Path) -> str:
+    """Compute the SHA-256 hex digest of a file.
+
+    Reads the file in 8 MB chunks so large checkpoint files do not need
+    to be fully buffered in memory.
+
+    Args:
+        path: Absolute or relative path to the file.
+
+    Returns:
+        64-character lowercase hex string, e.g.
+        ``"a3f5c…"`` — the SHA-256 digest of the file bytes.
+
+    Raises:
+        FileNotFoundError: If the path does not point to an existing file.
+    """
+    target = Path(path)
+    if not target.is_file():
+        raise FileNotFoundError(f"Cannot compute SHA-256: file not found at {target}")
+
+    hasher = hashlib.sha256()
+    chunk_size = 8 * 1024 * 1024  # 8 MB
+    with target.open("rb") as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def _strip_module_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

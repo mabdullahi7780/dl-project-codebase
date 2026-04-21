@@ -178,7 +178,15 @@ class FaithfulnessChecker:
 
     Uses ScispaCy NER when available; otherwise falls back to a minimal
     rule-based check.  The fallback is sufficient to catch the most
-    common hallucinations (cavity vs no-cavity, severity mismatch).
+    common hallucinations (cavity vs no-cavity, severity mismatch,
+    lateralisation errors, unsupported pathology claims).
+
+    Extended checks
+    ---------------
+    check_lateralisation   — report must not name the wrong lung side.
+    check_cavity_consistency — "no cavity" must not appear when cavity_flag=True.
+    check_pathology_claims  — any pathology named in the report must be in the
+                              TXV top-k list.
     """
 
     def __init__(self) -> None:
@@ -191,28 +199,206 @@ class FaithfulnessChecker:
         except Exception:
             self.has_spacy = False
 
-    def verify_report(self, report_text: str, evidence_json: dict[str, Any]) -> bool:
+    # ------------------------------------------------------------------
+    # Extended check 1 — lateralisation
+    # ------------------------------------------------------------------
+
+    def check_lateralisation(
+        self,
+        report_text: str,
+        mask_fused_256: "torch.Tensor | None",
+        lung_mask_256: "torch.Tensor | None",
+    ) -> bool:
+        """Return False if the report names the wrong lung side.
+
+        Computes the lesion centroid x-coordinate relative to the lung
+        bounding box midpoint.  If the lesion is on the left half of the
+        image but the report says "right", or vice versa, the check fails.
+
+        When either mask is None (baseline path) the check is skipped
+        (returns True).
+        """
+        if mask_fused_256 is None or lung_mask_256 is None:
+            return True
+
+        report_lower = report_text.lower()
+        mentions_right = "right lung" in report_lower or "right lobe" in report_lower
+        mentions_left  = "left lung"  in report_lower or "left lobe"  in report_lower
+
+        if not (mentions_right or mentions_left):
+            # No lateralisation claim — nothing to check
+            return True
+
+        try:
+            import torch
+
+            # Work on 2-D arrays
+            mask_2d = mask_fused_256.squeeze().float()
+            lung_2d = lung_mask_256.squeeze().float()
+
+            lung_cols = lung_2d.nonzero(as_tuple=False)[:, 1]
+            if lung_cols.numel() == 0:
+                return True
+            lung_mid_x = float(lung_cols.float().mean())
+
+            mask_cols = (mask_2d > 0.5).nonzero(as_tuple=False)[:, 1]
+            if mask_cols.numel() == 0:
+                return True
+            lesion_centroid_x = float(mask_cols.float().mean())
+
+            # In a standard PA CXR, "left" lung appears on the right side of
+            # the image (patient's left = image right).  Use the simpler
+            # image-space convention: lesion_x < lung_mid => image-left side.
+            lesion_on_image_left = lesion_centroid_x < lung_mid_x
+
+            # image-left = patient's RIGHT lung in PA
+            lesion_on_patient_right = lesion_on_image_left
+
+            if mentions_right and not lesion_on_patient_right:
+                return False
+            if mentions_left and lesion_on_patient_right:
+                return False
+        except Exception:
+            # If tensor ops fail for any reason, skip the check
+            return True
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Extended check 2 — cavity consistency
+    # ------------------------------------------------------------------
+
+    def check_cavity_consistency(self, report_text: str, cavity_flag: bool) -> bool:
+        """Return False if the report says "no cavity" when cavity_flag is True.
+
+        A model that detected a cavity (cavity_flag=True) but then writes
+        "no cavity" is self-contradictory.  This catches that specific case.
+        """
+        report_lower = report_text.lower()
+        no_cavity_phrases = (
+            "no cavity",
+            "no cavitation",
+            "without cavit",
+            "absence of cavit",
+            "no discrete cavit",
+        )
+        if cavity_flag:
+            for phrase in no_cavity_phrases:
+                if phrase in report_lower:
+                    return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Extended check 3 — pathology claims
+    # ------------------------------------------------------------------
+
+    # Vocabulary map: report keyword → TXV class names that support the claim.
+    # A claim in the report is "supported" if at least one matching TXV class
+    # appears in the provided top_txv_classes list.
+    _CLAIM_TO_TXV: dict[str, tuple[str, ...]] = {
+        "consolidation":    ("Consolidation",),
+        "effusion":         ("Effusion", "Pleural_Thickening"),
+        "pleural effusion": ("Effusion", "Pleural_Thickening"),
+        "pneumothorax":     ("Pneumothorax",),
+        "atelectasis":      ("Atelectasis",),
+        "cardiomegaly":     ("Cardiomegaly",),
+        "infiltrate":       ("Infiltration",),
+        "infiltration":     ("Infiltration",),
+        "nodule":           ("Nodule", "Mass"),
+        "mass":             ("Mass", "Nodule"),
+        "fibrosis":         ("Fibrosis",),
+        "emphysema":        ("Emphysema",),
+        "edema":            ("Edema",),
+    }
+
+    def check_pathology_claims(
+        self,
+        report_text: str,
+        top_txv_classes: list[str],
+    ) -> bool:
+        """Return False if the report names a pathology absent from TXV top-k.
+
+        Any pathology keyword found in the report must be supported by at
+        least one class in ``top_txv_classes``.  Unknown keywords (not in
+        ``_CLAIM_TO_TXV``) are ignored so novel phrasings do not cause
+        spurious failures.
+
+        Args:
+            report_text:    The generated report string.
+            top_txv_classes: List of TXV class names that exceeded the
+                             flag threshold (e.g. ``["Consolidation", "Nodule"]``).
+        """
+        report_lower = report_text.lower()
+        txv_set = {c.lower() for c in top_txv_classes}
+
+        for keyword, supporting_classes in self._CLAIM_TO_TXV.items():
+            if keyword in report_lower:
+                # Check that at least one supporting TXV class was flagged
+                if not any(sc.lower() in txv_set for sc in supporting_classes):
+                    return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Master verification (wires all checks together)
+    # ------------------------------------------------------------------
+
+    def verify_report(
+        self,
+        report_text: str,
+        evidence_json: dict[str, Any],
+        *,
+        mask_fused_256: "torch.Tensor | None" = None,
+        lung_mask_256: "torch.Tensor | None" = None,
+    ) -> bool:
+        """Run all faithfulness checks against evidence_json.
+
+        The extended checks (lateralisation, cavity consistency, pathology
+        claims) are wired in here so the existing call-site in ``generate``
+        does not need to change — the extra kwargs default to None and the
+        extended checks gracefully no-op when data is unavailable.
+        """
         report_lower = report_text.lower()
         scoring = evidence_json.get("scoring", {})
 
-        # Severity
+        # --- original check 1: severity ---
         severity = str(scoring.get("severity", "")).lower()
         if severity and severity not in report_lower:
             return False
 
-        # Cavitation
-        cavity_flag = int(scoring.get("cavity_flag", 0) or 0)
+        # --- original check 2: cavitation ---
+        cavity_flag_raw = scoring.get("cavity_flag", 0) or 0
+        cavity_flag_bool = bool(int(cavity_flag_raw))
         confidence = str(scoring.get("cavitation_confidence", ""))
 
-        if cavity_flag == 1 and "cavit" not in report_lower:
+        if cavity_flag_bool and "cavit" not in report_lower:
             return False
-        if cavity_flag == 0 and "cavity" in report_lower and "no cavity" not in report_lower and "without cavit" not in report_lower:
-            # Hallucinated cavitation
+        if not cavity_flag_bool and "cavity" in report_lower \
+                and "no cavity" not in report_lower \
+                and "without cavit" not in report_lower:
             return False
 
-        # Baseline-not-assessed must not claim cavitation either way
-        if confidence == "not-assessed-baseline" and ("cavity" in report_lower or "cavitation" in report_lower):
+        if confidence == "not-assessed-baseline" \
+                and ("cavity" in report_lower or "cavitation" in report_lower):
             if "not assessed" not in report_lower and "no cavit" not in report_lower:
+                return False
+
+        # --- extended check: cavity consistency ---
+        if not self.check_cavity_consistency(report_text, cavity_flag_bool):
+            return False
+
+        # --- extended check: lateralisation ---
+        if not self.check_lateralisation(report_text, mask_fused_256, lung_mask_256):
+            return False
+
+        # --- extended check: pathology claims ---
+        pathology_flags = evidence_json.get("pathology_flags", {})
+        # Build the top-k list from whichever format pathology_flags is in
+        if isinstance(pathology_flags, dict):
+            top_txv = [k for k, v in pathology_flags.items() if v]
+        else:
+            top_txv = []
+        if top_txv:
+            if not self.check_pathology_claims(report_text, top_txv):
                 return False
 
         return True

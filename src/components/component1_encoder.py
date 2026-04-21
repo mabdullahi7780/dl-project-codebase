@@ -190,8 +190,8 @@ class MockTransformerBlock(nn.Module):
         return x
 
 
-class MockSAMViTHImageEncoder(nn.Module):
-    """Development fallback that preserves the SAM ViT-H tensor contract."""
+class MockMedSAMViTBImageEncoder(nn.Module):
+    """Development fallback that preserves the MedSAM ViT-B tensor contract."""
 
     def __init__(
         self,
@@ -239,6 +239,11 @@ class MockSAMViTHImageEncoder(nn.Module):
             tokens = block(tokens)
         x = tokens.transpose(1, 2).reshape(batch, channels, height, width)
         return self.neck(x)
+
+
+# Back-compat alias — the class was previously named MockSAMViTHImageEncoder.
+# Any code that imported the old name continues to work without modification.
+MockSAMViTHImageEncoder = MockMedSAMViTBImageEncoder
 
 
 class MedSAMViTBEncoder(nn.Module):
@@ -394,7 +399,7 @@ def build_component1_encoder(config: Component1EncoderConfig | None = None) -> C
     if backend == "segment_anything":
         backbone: nn.Module = MedSAMViTBEncoder(checkpoint_path=cfg.checkpoint_path)
     elif backend == "mock":
-        backbone = MockSAMViTHImageEncoder(
+        backbone = MockMedSAMViTBImageEncoder(
             input_channels=cfg.input_channels,
             patch_size=cfg.patch_size,
             embed_dim=cfg.embed_dim,
