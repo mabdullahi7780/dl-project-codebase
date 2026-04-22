@@ -39,37 +39,33 @@ def compute_timika_score(
     # Convert to binary
     lesion_bin = (mask_refined > 0.5).astype(np.uint8)  # [1024, 1024]
     lung_bin = (lung_mask > 0.5).astype(np.uint8)       # [1024, 1024]
-    # Cavity threshold raised to 0.85 (from 0.6) — Expert 2 outputs sigmoid probs
-    # and fires broadly on lightly-trained weights; a high threshold ensures only
-    # genuinely high-confidence regions count as cavitation.
     cavity_bin = (
         np.zeros((256, 256), dtype=np.uint8)
         if mask_e2 is None
-        else (mask_e2 > 0.85).astype(np.uint8)
+        else (mask_e2 > 0.6).astype(np.uint8)
     )
 
     # ALP (Affected Lung Percentage)
     lesion_in_lung = lesion_bin * lung_bin
-
+    
     lung_area = lung_bin.sum()
     if lung_area == 0:
         ALP = 0.0
     else:
         ALP = (lesion_in_lung.sum() / lung_area) * 100.0  # float, 0-100
 
-    # Cavitation flag — connected component size filter.
-    # Min size raised to 200px at 256×256 (≈ 28×28 px region) to avoid
-    # small noise blobs from triggering a cavity diagnosis.
+    # Cavitation flag - connected component size filter
     labeled, n = ndimage.label(cavity_bin)
-
+    
     cavity_flag = 0
     if n > 0:
         sizes = ndimage.sum(cavity_bin, labeled, range(1, n + 1))
         # ndimage.sum returns a scalar if there is exactly 1 component, otherwise a sequence
         if np.isscalar(sizes):
             sizes = [sizes]
-
-        if any(s > 200 for s in sizes):
+        
+        # 50 pixels at 256x256 approx a 14x14px cavity minimum size
+        if any(s > 50 for s in sizes):
             cavity_flag = 1
             
     # Timika Score
