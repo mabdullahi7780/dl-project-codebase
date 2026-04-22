@@ -260,6 +260,8 @@ def run_single_image_inference(
     seed: int = 1337,
     component4_decoder_ckpt: str | Path | None = None,
     component1_adapter_path: str | Path | None = None,
+    prebuilt_models: tuple | None = None,
+    prebuilt_moe_models: tuple | None = None,
 ) -> BaselineInferenceBundle:
     config = load_baseline_config(config_path)
     if component4_decoder_ckpt is not None:
@@ -286,10 +288,16 @@ def run_single_image_inference(
         apply_clahe=config.get("component0", {}).get("apply_clahe"),
     )
 
-    component1_model, component2_model, component4_model = build_models(config, device)
+    if prebuilt_models is not None:
+        component1_model, component2_model, component4_model = prebuilt_models
+    else:
+        component1_model, component2_model, component4_model = build_models(config, device)
 
     # Try to build MoE models — returns None if not configured
-    moe_models = build_moe_models(config, device)
+    if prebuilt_moe_models is not None:
+        moe_models = prebuilt_moe_models
+    else:
+        moe_models = build_moe_models(config, device)
     use_moe = moe_models is not None
 
     proposer = BaselineLesionProposer(
