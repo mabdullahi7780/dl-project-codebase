@@ -106,15 +106,23 @@ def build_models(
     component1_model.loaded_adapter_path = None  # type: ignore[attr-defined]
     adapter_path = component1_cfg.get("adapter_path")
     if adapter_path:
-        try:
-            loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
-            component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
-            print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
-        except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+        if encoder.active_backend != "segment_anything":
+            # Adapters are trained against the real MedSAM ViT-B backbone;
+            # their parameter names won't match the mock fallback's module tree.
             print(
-                "WARNING: failed to load Component 1 adapters from "
-                f"{adapter_path!r}; continuing with frozen backbone only. Error: {exc}"
+                f"WARNING: adapter_path set but Component 1 backend is "
+                f"{encoder.active_backend!r}; LoRA+DANN adapters NOT loaded."
             )
+        else:
+            try:
+                loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
+                component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
+                print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
+            except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+                print(
+                    "WARNING: failed to load Component 1 adapters from "
+                    f"{adapter_path!r}; continuing with frozen backbone only. Error: {exc}"
+                )
     component2_model = Component2SoftDomainContext(
         backend=str(component2_cfg.get("backend", "auto")),
         weights=str(component2_cfg.get("weights", "densenet121-res224-all")),
