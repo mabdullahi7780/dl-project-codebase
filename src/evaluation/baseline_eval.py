@@ -118,6 +118,8 @@ class PerImageResult:
     alp: float
     timika_score: float
     severity: str
+    # Fix 1: sigmoid(tb_logit) from the trained TB head; 0.5 when tb_head absent.
+    tb_head_score: float = 0.5
 
 
 # ---------- small helpers ----------
@@ -475,12 +477,20 @@ def _pipeline_forward(
     txv = component2_model.forward_features(x224)
     lung = component4_model.predict_masks(x3)
 
+    # Fix 1 & 3: compute TB logit for CAM scaling and as a standalone metric.
+    _tb_logit: torch.Tensor | None = None
+    tb_head_score = 0.5
+    if hasattr(component2_model, "tb_head"):
+        _tb_logit = component2_model.tb_head(txv.pooled_features)
+        tb_head_score = float(torch.sigmoid(_tb_logit).squeeze().item())
+
     proposal = proposer.propose(
         x_224=x224,
         features_7x7=txv.features_7x7,
         pathology_logits=txv.pathology_logits,
         lung_mask_256=lung.lung_mask_256,
         classifier_weight=txv.classifier_weight,
+        tb_logit=_tb_logit,
     )
 
     coarse_256 = proposal.lesion_mask_coarse_256[0]  # [1, 256, 256]
@@ -516,6 +526,7 @@ def _pipeline_forward(
         alp=float(timika.ALP),
         timika_score=float(timika.timika_score),
         severity=str(timika.severity),
+        tb_head_score=tb_head_score,
     )
 
 
@@ -737,6 +748,23 @@ def compute_system_metrics(results: list[PerImageResult]) -> list[SystemRow]:
         note = "" if auc is not None else "only one class present in test split"
         rows.append(SystemRow("timika_auroc", dom, auc, len(labelled), note))
 
+    # -- TB head AUROC (Fix 1): direct measure of the binary TB classifier.
+    # Meaningful only after the TB head has been fine-tuned; 0.5 = untrained. --
+    for dom in DOMAIN_IDS:
+        labelled = [
+            (r.tb_head_score, r.tb_label)
+            for r in results
+            if r.dataset_id == dom and r.tb_label is not None
+        ]
+        if not labelled:
+            rows.append(SystemRow("tb_head_auroc", dom, None, 0, "no TB/non-TB labels"))
+            continue
+        y_score = np.array([x for x, _ in labelled], dtype=np.float64)
+        y_true = np.array([y for _, y in labelled], dtype=np.int32)
+        auc = _safe_auroc(y_true, y_score)
+        note = "" if auc is not None else "only one class present in test split"
+        rows.append(SystemRow("tb_head_auroc", dom, auc, len(labelled), note))
+
     # -- Report faithfulness (deterministic template → 1.0 by construction) --
     rows.append(
         SystemRow(
@@ -837,6 +865,11 @@ def run_baseline_evaluation(
     component2_model.eval()
     component4_model.eval()
 
+    # Fix 3: use trained TB head weight for TB-specific CAM if available.
+    _eval_tb_weight = None
+    if hasattr(component2_model, "tb_head"):
+        _eval_tb_weight = component2_model.tb_head.weight[0].detach()
+
     proposer = BaselineLesionProposer(
         BaselineLesionProposerConfig(
             suspicious_class_threshold=float(
@@ -847,7 +880,8 @@ def run_baseline_evaluation(
             opening_iters=int(baseline_config.get("baseline_lesion_proposer", {}).get("opening_iters", 1)),
             closing_iters=int(baseline_config.get("baseline_lesion_proposer", {}).get("closing_iters", 1)),
             fallback_blend=float(baseline_config.get("baseline_lesion_proposer", {}).get("fallback_blend", 0.35)),
-        )
+        ),
+        tb_head_weight=_eval_tb_weight,
     )
     refine_cfg = BaselineRefineConfig(
         min_area_px=int(baseline_config.get("component7_refine", {}).get("min_area_px", 48)),
@@ -928,6 +962,7 @@ def run_baseline_evaluation(
                 "alp",
                 "timika_score",
                 "severity",
+                "tb_head_score",
             ]
         )
         for r in results:
@@ -941,6 +976,7 @@ def run_baseline_evaluation(
                     f"{r.alp:.6f}",
                     f"{r.timika_score:.6f}",
                     r.severity,
+                    f"{r.tb_head_score:.6f}",
                 ]
             )
 

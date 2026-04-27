@@ -20,7 +20,17 @@
       "Bash(python -m pytest tests/test_infer_contract.py tests/test_infer_moe_contract.py -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")",
       "Bash(python -m pytest tests/ -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")",
       "Read(//c/c/Users/mabdu_8h1ndel/OneDrive - Higher Education Commission/Desktop/Uni/sem_6/DL/proj/dl-project-codebase/src/**)",
-      "Read(//c/c/Users/mabdu_8h1ndel/OneDrive - Higher Education Commission/Desktop/Uni/sem_6/DL/proj/dl-project-codebase/**)"
+      "Read(//c/c/Users/mabdu_8h1ndel/OneDrive - Higher Education Commission/Desktop/Uni/sem_6/DL/proj/dl-project-codebase/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/ -x -q --tb=short)",
+      "Bash(python -m pip install pytest -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_baseline_lesion_proposer.py tests/test_component2_txv.py -x -q --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_baseline_lesion_proposer.py tests/test_component1_encoder.py -x -q --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_baseline_lesion_proposer.py tests/test_component2.py tests/test_component4_training.py tests/test_infer_contract.py -x -q --tb=short)",
+      "Bash(.venv/Scripts/python -c \"import torch; print\\(torch.__version__\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

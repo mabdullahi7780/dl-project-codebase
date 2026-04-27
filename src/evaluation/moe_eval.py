@@ -79,6 +79,8 @@ class MoEPerImageResult:
     cavity_flag: int
     boundary_score: float
     fp_probability: float
+    # Fix 1: sigmoid(tb_logit) from the trained TB head; 0.5 when tb_head absent.
+    tb_head_score: float = 0.5
 
 
 def _pipeline_forward_moe(
@@ -108,6 +110,12 @@ def _pipeline_forward_moe(
     txv = component2_model.forward_features(x224)
     # C4
     lung = component4_model.predict_masks(x3)
+
+    # Fix 1: compute TB head score for direct AUROC metric.
+    tb_head_score = 0.5
+    if hasattr(component2_model, "tb_head"):
+        _tb_l = component2_model.tb_head(txv.pooled_features)
+        tb_head_score = float(torch.sigmoid(_tb_l).squeeze().item())
 
     # C3: routing gate
     routing_weights = routing_gate(
@@ -198,6 +206,7 @@ def _pipeline_forward_moe(
         cavity_flag=int(timika.cavity_flag),
         boundary_score=float(boundary_score),
         fp_probability=float(fp_audit.fp_probability),
+        tb_head_score=tb_head_score,
     )
 
 
@@ -333,6 +342,19 @@ def compute_moe_system_metrics(results: list[MoEPerImageResult]) -> list[SystemR
         rate = float(np.mean([r.cavity_flag for r in tb_pos]))
         rows.append(SystemRow("cavity_detection_rate", dom, rate, len(tb_pos),
                               "fraction of TB+ cases with cavity flagged by Expert 2"))
+
+    # TB head AUROC (Fix 1): P(TB|image) from the trained binary head.
+    for dom in DOMAIN_IDS:
+        labelled = [(r.tb_head_score, r.tb_label) for r in results
+                    if r.dataset_id == dom and r.tb_label is not None]
+        if not labelled:
+            rows.append(SystemRow("tb_head_auroc", dom, None, 0, "no TB/non-TB labels"))
+            continue
+        y_score = np.array([x for x, _ in labelled], dtype=np.float64)
+        y_true  = np.array([y for _, y in labelled], dtype=np.int32)
+        auc = _safe_auroc(y_true, y_score)
+        rows.append(SystemRow("tb_head_auroc", dom, auc, len(labelled),
+                              "" if auc is not None else "only one class present"))
 
     rows.append(SystemRow("report_faithfulness", "all", 1.0, len(results),
                           "deterministic template — faithfulness guaranteed"))
@@ -483,6 +505,7 @@ def run_moe_evaluation(
             "dom_pred", "dom_true",
             "alp", "timika_score", "severity", "cavity_flag",
             "boundary_score", "fp_probability",
+            "tb_head_score",
             "routing_consolidation", "routing_cavity",
             "routing_fibrosis", "routing_nodule",
         ])
@@ -494,6 +517,7 @@ def run_moe_evaluation(
                 r.dom_pred, r.dom_true,
                 f"{r.alp:.6f}", f"{r.timika_score:.6f}", r.severity, r.cavity_flag,
                 f"{r.boundary_score:.4f}", f"{r.fp_probability:.4f}",
+                f"{r.tb_head_score:.6f}",
                 f"{rw.get('consolidation', 0):.4f}", f"{rw.get('cavity', 0):.4f}",
                 f"{rw.get('fibrosis', 0):.4f}",      f"{rw.get('nodule', 0):.4f}",
             ])
