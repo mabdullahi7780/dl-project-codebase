@@ -18,7 +18,9 @@
       "Bash(python -m pytest tests/test_checkpoint_utils.py -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")",
       "Bash(python -m pytest tests/ -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\" --ignore=tests/test_infer_moe_contract.py --ignore=tests/test_infer_contract.py)",
       "Bash(python -m pytest tests/test_infer_contract.py tests/test_infer_moe_contract.py -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")",
-      "Bash(python -m pytest tests/ -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")"
+      "Bash(python -m pytest tests/ -q --tb=short --basetemp=\"C:/tmp/pytest_tb_pipeline\")",
+      "Read(//c/c/Users/mabdu_8h1ndel/OneDrive - Higher Education Commission/Desktop/Uni/sem_6/DL/proj/dl-project-codebase/src/**)",
+      "Read(//c/c/Users/mabdu_8h1ndel/OneDrive - Higher Education Commission/Desktop/Uni/sem_6/DL/proj/dl-project-codebase/**)"
     ]
   }
 }
