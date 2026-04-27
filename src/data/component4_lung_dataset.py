@@ -163,7 +163,14 @@ def resize_mask_to(mask_uint8: np.ndarray, size: int) -> torch.Tensor:
 
 
 class Component4LungDataset(Dataset[dict[str, Any]]):
-    """Returns dicts: {x_3ch [3,1024,1024], mask [1,256,256], sample_id, dataset}."""
+    """Returns dicts: {x_3ch [3,1024,1024], mask [1,256,256], sample_id, dataset}.
+
+    Fix 4 augmentations (training only, disabled for val/test):
+      - Random horizontal flip (p=0.5) applied identically to image AND mask.
+      - Random brightness jitter: scale [0.8, 1.2] applied to image pixels only.
+    These increase effective dataset size for Montgomery/Shenzhen (few hundred
+    annotated images) and reduce the Dice gap vs. fully fine-tuned MedSAM.
+    """
 
     def __init__(
         self,
@@ -171,12 +178,14 @@ class Component4LungDataset(Dataset[dict[str, Any]]):
         *,
         low_res_mask_size: int = LOW_RES_MASK_SIZE,
         apply_clahe: bool | None = None,
+        augment: bool = False,
     ) -> None:
         if not records:
             raise ValueError("Component4LungDataset received zero records.")
         self.records = records
         self.low_res_mask_size = int(low_res_mask_size)
         self.apply_clahe = apply_clahe
+        self.augment = augment
 
     def __len__(self) -> int:
         return len(self.records)
@@ -190,8 +199,20 @@ class Component4LungDataset(Dataset[dict[str, Any]]):
         )
         mask_np = load_and_merge_binary_mask(record.mask_paths)
         mask_lowres = resize_mask_to(mask_np, self.low_res_mask_size)
+        x_3ch = harmonised.x_3ch  # [3, 1024, 1024] in [0, 1]
+
+        if self.augment:
+            # Horizontal flip: apply to both x_3ch and mask with the same decision.
+            if torch.rand(1).item() > 0.5:
+                x_3ch = torch.flip(x_3ch, dims=[2])
+                mask_lowres = torch.flip(mask_lowres, dims=[2])
+
+            # Brightness jitter: multiplicative scale in [0.8, 1.2].
+            scale = 0.8 + 0.4 * torch.rand(1).item()
+            x_3ch = (x_3ch * scale).clamp(0.0, 1.0)
+
         return {
-            "x_3ch": harmonised.x_3ch,
+            "x_3ch": x_3ch,
             "mask": mask_lowres,
             "sample_id": record.sample_id,
             "dataset": record.dataset,

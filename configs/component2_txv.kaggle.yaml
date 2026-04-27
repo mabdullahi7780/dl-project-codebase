@@ -1,0 +1,20 @@
+component2_txv:
+  model:
+    backend: auto
+    weights: densenet121-res224-all
+  training:
+    seed: 1337
+    device: null
+    epochs: 15
+    batch_size: 32
+    num_workers: 2
+    lr: 5.0e-4
+    temperature: 0.1
+    patience: 5
+    tb_head_weight: 1.0
+    limit_per_domain: null
+    save_dir: /kaggle/working/component2_runs
+    save_name: component2_routing_head.pt
+  data:
+    val_split: 0.2
+    exclude_datasets: [nih_cxr14]

@@ -91,11 +91,21 @@ class Component2SoftDomainContext(nn.Module):
             nn.Linear(256, 256)
         )
 
+        # Fix 1: Binary TB classification head — trainable, separate from routing head.
+        # Weight vector (shape [1024]) doubles as the CAM projection for the lesion proposer.
+        self.tb_head = nn.Linear(1024, 1)
+
     def get_classifier_weight(self) -> torch.Tensor | None:
         classifier = getattr(self.txv_model, "classifier", None)
         if isinstance(classifier, nn.Linear):
             return classifier.weight.detach()
         return None
+
+    def tb_head_state_dict(self) -> dict[str, torch.Tensor]:
+        return {k: v.detach().cpu().clone() for k, v in self.tb_head.state_dict().items()}
+
+    def load_tb_head_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+        self.tb_head.load_state_dict(state_dict, strict=True)
 
     def routing_head_state_dict(self) -> dict[str, torch.Tensor]:
         return {
@@ -135,6 +145,12 @@ class Component2SoftDomainContext(nn.Module):
             raise ValueError(f"Unrecognised Component 2 routing-head payload at {path}.")
 
         self.load_routing_head_state_dict(state_dict)
+
+        # Restore TB head if the checkpoint includes it.
+        tb_sd = payload.get("tb_head") if isinstance(payload, dict) else None
+        if isinstance(tb_sd, dict) and any(isinstance(v, torch.Tensor) for v in tb_sd.values()):
+            self.load_tb_head_state_dict({str(k): v for k, v in tb_sd.items() if isinstance(v, torch.Tensor)})
+
         return path
 
     def forward_features(self, x_224: torch.Tensor) -> TXVForwardOutput:
@@ -156,6 +172,13 @@ class Component2SoftDomainContext(nn.Module):
             classifier_weight=self.get_classifier_weight(),
             class_names=TXV_CLASS_NAMES,
         )
+
+    def forward_tb_logit(self, x_224: torch.Tensor) -> torch.Tensor:
+        """Returns [B, 1] raw TB logit. Backbone is frozen; only tb_head runs in grad mode."""
+        with torch.no_grad():
+            features = self.txv_model.features(x_224)
+            pooled = F.adaptive_avg_pool2d(features, (1, 1)).view(features.size(0), -1)
+        return self.tb_head(pooled)
 
     def forward(self, x_224: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """

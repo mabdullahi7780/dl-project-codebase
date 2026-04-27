@@ -76,11 +76,12 @@ def _build_loader(
     apply_clahe: bool | None,
     max_samples: int | None,
     repo_root: Path,
+    augment: bool = False,
 ) -> DataLoader:
     records = parse_manifest(manifest_path, repo_root=repo_root, split=split)
     if max_samples is not None and max_samples > 0:
         records = records[: int(max_samples)]
-    dataset = Component4LungDataset(records, apply_clahe=apply_clahe)
+    dataset = Component4LungDataset(records, apply_clahe=apply_clahe, augment=augment)
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -275,6 +276,8 @@ def main() -> None:
     val_manifest = data_cfg.get("val_manifest", train_manifest)
 
     apply_clahe = data_cfg.get("apply_clahe")
+    # Fix 4: augmentation enabled for training split when config sets augment=true.
+    augment_train = bool(data_cfg.get("augment", False))
     max_train_samples = training_cfg.get("max_train_samples")
     max_val_samples = training_cfg.get("max_val_samples")
 
@@ -287,6 +290,7 @@ def main() -> None:
         apply_clahe=apply_clahe,
         max_samples=max_train_samples,
         repo_root=repo_root,
+        augment=augment_train,
     )
     val_loader = _build_loader(
         val_manifest,
@@ -297,6 +301,7 @@ def main() -> None:
         apply_clahe=apply_clahe,
         max_samples=max_val_samples,
         repo_root=repo_root,
+        augment=False,
     )
 
     model = Component4MedSAM(

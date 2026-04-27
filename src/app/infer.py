@@ -300,6 +300,11 @@ def run_single_image_inference(
         moe_models = build_moe_models(config, device)
     use_moe = moe_models is not None
 
+    # Fix 3: pass the TB head weight so the lesion proposer uses a TB-specific CAM.
+    _tb_weight = None
+    if hasattr(component2_model, "tb_head"):
+        _tb_weight = component2_model.tb_head.weight[0].detach()
+
     proposer = BaselineLesionProposer(
         BaselineLesionProposerConfig(
             suspicious_class_threshold=float(config.get("baseline_lesion_proposer", {}).get("suspicious_class_threshold", 0.25)),
@@ -308,7 +313,8 @@ def run_single_image_inference(
             opening_iters=int(config.get("baseline_lesion_proposer", {}).get("opening_iters", 1)),
             closing_iters=int(config.get("baseline_lesion_proposer", {}).get("closing_iters", 1)),
             fallback_blend=float(config.get("baseline_lesion_proposer", {}).get("fallback_blend", 0.35)),
-        )
+        ),
+        tb_head_weight=_tb_weight,
     )
     refine_cfg = BaselineRefineConfig(
         min_area_px=int(config.get("component7_refine", {}).get("min_area_px", 48)),
@@ -455,13 +461,20 @@ def run_single_image_inference(
             pipeline_mode = "moe"
 
         else:
-            # ===== BASELINE PATH (unchanged) =====
+            # ===== BASELINE PATH =====
+            # Fix 3: compute TB logit so the proposer can scale its TB-CAM by
+            # the model's TB confidence (passes None gracefully if tb_head absent).
+            _tb_logit: torch.Tensor | None = None
+            if hasattr(component2_model, "tb_head"):
+                _tb_logit = component2_model.tb_head(txv_output.pooled_features)
+
             lesion_proposal = proposer.propose(
                 x_224=x224,
                 features_7x7=txv_output.features_7x7,
                 pathology_logits=txv_output.pathology_logits,
                 lung_mask_256=lung_output.lung_mask_256,
                 classifier_weight=txv_output.classifier_weight,
+                tb_logit=_tb_logit,
             )
 
             coarse_mask_256 = lesion_proposal.lesion_mask_coarse_256[0]

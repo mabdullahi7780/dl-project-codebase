@@ -23,11 +23,18 @@ component1_dann:
   training:
     seed: 1337
     device: null
-    epochs: 8
+    # Fix 2: 20 epochs (was 8) so the GRL has time to gradually push the encoder
+    # toward domain-invariant representations without being overwhelmed early.
+    epochs: 20
     batch_size: 2
     num_workers: 2
-    grl_ramp_epochs: 4
-    max_lambda: 1.0
+    # Fix 2: ramp λ over first 10 epochs (was 4) to give the LoRA adapters time
+    # to learn useful features before the gradient reversal kicks in hard.
+    grl_ramp_epochs: 10
+    # Fix 2: max λ = 0.3 (was 1.0).  λ=1.0 collapses the encoder by making the
+    # adversarial gradient dominate; 0.3 achieves domain-confusion without
+    # erasing discriminative TB features in the LoRA adapters.
+    max_lambda: 0.3
     lr_lora: 0.0001
     lr_dann: 0.001
     weight_decay: 0.0001

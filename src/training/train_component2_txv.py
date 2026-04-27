@@ -21,8 +21,47 @@ from src.training.train_component1_dann import (
 from src.components.component0_qc import harmonise_sample
 
 
+def _extract_tb_label(sample: DomainSampleRef) -> int | None:
+    """Extract binary TB label (1=TB, 0=normal) from the sample reference.
+
+    Montgomery / Shenzhen: filename stem ends with ``_0`` (normal) or ``_1`` (TB).
+    TBX11K: image path contains ``imgs/tb/`` (TB) or ``imgs/health/`` / ``sick_non_covid/`` (normal).
+    NIH CXR-14: no TB labels — returns None so the sample is excluded from TB loss.
+    """
+    from pathlib import Path as _Path
+
+    if sample.dataset_id in ("montgomery", "shenzhen"):
+        source = _Path(sample.source if sample.image_path is None else sample.image_path)
+        parts = source.stem.rsplit("_", 1)
+        if len(parts) == 2:
+            suffix = parts[-1]
+            if suffix == "1":
+                return 1
+            if suffix == "0":
+                return 0
+        return None
+
+    if sample.dataset_id == "tbx11k":
+        path_str = sample.image_path or sample.source or ""
+        path_parts = _Path(path_str).parts
+        for i, part in enumerate(path_parts):
+            if part == "imgs" and i + 1 < len(path_parts):
+                sub = path_parts[i + 1]
+                if sub == "tb":
+                    return 1
+                if sub in ("health", "sick_non_covid"):
+                    return 0
+        return None
+
+    return None  # nih_cxr14 has no TB labels
+
+
 class Component2DomainDataset(Component1DomainDataset):
-    """Dataset providing the TXV-normalised [1, 224, 224] branch instead of [3, 1024, 1024]."""
+    """Dataset providing the TXV-normalised [1, 224, 224] branch instead of [3, 1024, 1024].
+
+    Each item also exposes a ``tb_label`` key:  0 or 1 when a label is available,
+    -1 when the dataset carries no TB annotation (NIH, or unlabelled TBX11K subset).
+    """
 
     def __init__(self, samples: list[DomainSampleRef]) -> None:
         # Component 2 doesn't use the DANN augmentations (gamma/poisson)
@@ -31,17 +70,20 @@ class Component2DomainDataset(Component1DomainDataset):
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample = self.samples[index]
         image = self._load_image(sample)
-        
-        # QC & Normalization via Component 0 logic
+
         harmonised = harmonise_sample({
             "image": image,
             "dataset_id": sample.dataset_id,
             "source": sample.source
         })
 
+        raw_label = _extract_tb_label(sample)
+        tb_label = -1 if raw_label is None else int(raw_label)
+
         return {
             "x_224": harmonised.x_224,
             "domain_id": torch.tensor(sample.domain_id, dtype=torch.long),
+            "tb_label": torch.tensor(tb_label, dtype=torch.long),
             "dataset_id": sample.dataset_id,
             "source": sample.source
         }
@@ -51,6 +93,7 @@ def collate_component2_batch(batch: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "x_224": torch.stack([item["x_224"] for item in batch], dim=0),
         "domain_id": torch.stack([item["domain_id"] for item in batch], dim=0),
+        "tb_label": torch.stack([item["tb_label"] for item in batch], dim=0),
         "dataset_id": [item["dataset_id"] for item in batch],
         "source": [item["source"] for item in batch],
     }
@@ -102,15 +145,27 @@ def build_optimizer(model: Component2SoftDomainContext, config: dict[str, Any]) 
     return torch.optim.AdamW(trainable_params, lr=lr)
 
 
+def tb_bce_loss(tb_logits: torch.Tensor, tb_labels: torch.Tensor) -> torch.Tensor:
+    """BCE loss computed only on samples that have a valid TB label (label != -1)."""
+    valid = tb_labels != -1
+    if not valid.any():
+        return torch.tensor(0.0, device=tb_logits.device, requires_grad=False)
+    logits_valid = tb_logits[valid].float().squeeze(1)
+    labels_valid = tb_labels[valid].float()
+    return torch.nn.functional.binary_cross_entropy_with_logits(logits_valid, labels_valid)
+
+
 def save_routing_head(model: Component2SoftDomainContext, config: dict[str, Any]) -> Path:
     save_dir = Path(config["training"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / str(config["training"]["save_name"])
-    
     payload = {
-        name: param.detach().cpu()
-        for name, param in model.named_parameters()
-        if param.requires_grad
+        **{
+            name: param.detach().cpu()
+            for name, param in model.named_parameters()
+            if param.requires_grad and not name.startswith("tb_head")
+        },
+        "tb_head": model.tb_head_state_dict(),
     }
     torch.save(payload, save_path)
     return save_path
@@ -121,7 +176,8 @@ def train_one_epoch(
     loader: DataLoader[dict[str, Any]],
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    temperature: float
+    temperature: float,
+    tb_head_weight: float = 1.0,
 ) -> float:
     model.train()
     running_loss = 0.0
@@ -130,11 +186,17 @@ def train_one_epoch(
     for batch in loader:
         x_224 = batch["x_224"].to(device)
         domain_targets = batch["domain_id"].to(device)
+        tb_labels = batch["tb_label"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
         domain_ctx, _ = model(x_224)
-        
-        loss = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
+        contrastive = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
+
+        # Fix 1: add TB binary classification loss on top of contrastive objective
+        tb_logits = model.forward_tb_logit(x_224)
+        tb_loss = tb_bce_loss(tb_logits, tb_labels)
+        loss = contrastive + tb_head_weight * tb_loss
+
         loss.backward()
         optimizer.step()
 
@@ -150,7 +212,8 @@ def validate_one_epoch(
     model: Component2SoftDomainContext,
     loader: DataLoader[dict[str, Any]],
     device: torch.device,
-    temperature: float
+    temperature: float,
+    tb_head_weight: float = 1.0,
 ) -> float:
     model.eval()
     running_loss = 0.0
@@ -159,10 +222,14 @@ def validate_one_epoch(
     for batch in loader:
         x_224 = batch["x_224"].to(device)
         domain_targets = batch["domain_id"].to(device)
+        tb_labels = batch["tb_label"].to(device)
 
         domain_ctx, _ = model(x_224)
-        loss = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
-        
+        contrastive = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
+        tb_logits = model.forward_tb_logit(x_224)
+        tb_loss = tb_bce_loss(tb_logits, tb_labels)
+        loss = contrastive + tb_head_weight * tb_loss
+
         batch_size = domain_targets.shape[0]
         running_loss += float(loss.item()) * batch_size
         running_items += batch_size
@@ -232,14 +299,15 @@ def main() -> None:
 
     epochs = int(config["training"]["epochs"])
     temperature = float(config["training"]["temperature"])
+    tb_head_weight = float(config["training"].get("tb_head_weight", 1.0))
     early_stopper = EarlyStopping(patience=int(config["training"]["patience"]))
 
     best_model_path = config["training"]["save_dir"]
     best_path = None
 
     for epoch in range(epochs):
-        train_loss = train_one_epoch(model, train_loader, optimizer, device, temperature)
-        val_loss = validate_one_epoch(model, val_loader, device, temperature)
+        train_loss = train_one_epoch(model, train_loader, optimizer, device, temperature, tb_head_weight)
+        val_loss = validate_one_epoch(model, val_loader, device, temperature, tb_head_weight)
         
         improved = early_stopper.step(val_loss)
         

@@ -48,18 +48,27 @@ class BaselineLesionProposer:
         config: BaselineLesionProposerConfig | None = None,
         *,
         class_names: tuple[str, ...] = TXV_CLASS_NAMES,
+        tb_head_weight: torch.Tensor | None = None,
     ) -> None:
         self.config = config or BaselineLesionProposerConfig()
         self.class_names = class_names
         self.suspicious_indices = [
             index for index, name in enumerate(class_names) if name in SUSPICIOUS_CLASS_SET
         ]
+        # Fix 3: TB-specific CAM weight vector [1024] from the trained tb_head.
+        # When provided, the proposer uses this instead of averaging over the
+        # generic SUSPICIOUS_CLASS_SET, producing a heatmap that lights up the
+        # exact image regions the TB classifier relies on.
+        self.tb_head_weight: torch.Tensor | None = (
+            tb_head_weight.detach().cpu() if tb_head_weight is not None else None
+        )
 
     def _cam_map(
         self,
         features_7x7: torch.Tensor,
         pathology_logits: torch.Tensor,
         classifier_weight: torch.Tensor | None,
+        tb_logit: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, list[list[str]]]:
         probs = torch.sigmoid(pathology_logits)
         batch = features_7x7.shape[0]
@@ -67,6 +76,21 @@ class BaselineLesionProposer:
         selected_names: list[list[str]] = []
 
         for index in range(batch):
+            # Fix 3: When a trained TB head weight is available, compute a
+            # TB-specific CAM instead of averaging across suspicious pathology
+            # classes.  The weight vector [1024] projects features onto the axis
+            # the TB head found most predictive; scaling by sigmoid(tb_logit)
+            # suppresses the heatmap for images the model thinks are normal.
+            if self.tb_head_weight is not None:
+                weight = self.tb_head_weight.to(features_7x7.device).view(-1, 1, 1)
+                cam = torch.relu((features_7x7[index] * weight).sum(dim=0))
+                if tb_logit is not None:
+                    tb_conf = float(torch.sigmoid(tb_logit[index]).item())
+                    cam = cam * tb_conf
+                selected_names.append(["tb_cam"])
+                cams.append(cam)
+                continue
+
             selected = [
                 class_index
                 for class_index in self.suspicious_indices
@@ -126,6 +150,7 @@ class BaselineLesionProposer:
         pathology_logits: torch.Tensor,
         lung_mask_256: torch.Tensor,
         classifier_weight: torch.Tensor | None = None,
+        tb_logit: torch.Tensor | None = None,
     ) -> BaselineLesionProposal:
         if x_224.ndim != 4 or tuple(x_224.shape[1:]) != (1, 224, 224):
             raise ValueError(f"Expected x_224 [B, 1, 224, 224], got {tuple(x_224.shape)}.")
@@ -138,7 +163,7 @@ class BaselineLesionProposer:
         if lung_mask_256.ndim != 4 or tuple(lung_mask_256.shape[1:]) != (1, 256, 256):
             raise ValueError(f"Expected lung_mask_256 [B, 1, 256, 256], got {tuple(lung_mask_256.shape)}.")
 
-        cam_map_7x7, selected_classes = self._cam_map(features_7x7, pathology_logits, classifier_weight)
+        cam_map_7x7, selected_classes = self._cam_map(features_7x7, pathology_logits, classifier_weight, tb_logit)
         cam_map_256 = F.interpolate(cam_map_7x7, size=(256, 256), mode="bilinear", align_corners=False)
         cam_map_256 = cam_map_256.clamp_min(0.0)
 

@@ -28,3 +28,6 @@ component4_lung:
     train_manifest: ${COMPONENT4_TRAIN_MANIFEST:-data/splits/component4_manifest.csv}
     val_manifest:   ${COMPONENT4_VAL_MANIFEST:-data/splits/component4_manifest.csv}
     apply_clahe: null           # null -> honor Component 0 per-dataset defaults (Montgomery/Shenzhen = true)
+    # Fix 4: horizontal flip (p=0.5) + brightness jitter [0.8, 1.2] on training split.
+    # Both transforms applied consistently to image and mask.
+    augment: true
