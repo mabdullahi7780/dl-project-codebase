@@ -106,15 +106,23 @@ def build_models(
     component1_model.loaded_adapter_path = None  # type: ignore[attr-defined]
     adapter_path = component1_cfg.get("adapter_path")
     if adapter_path:
-        try:
-            loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
-            component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
-            print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
-        except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+        if encoder.active_backend != "segment_anything":
+            # Adapters are trained against the real MedSAM ViT-B backbone;
+            # their parameter names won't match the mock fallback's module tree.
             print(
-                "WARNING: failed to load Component 1 adapters from "
-                f"{adapter_path!r}; continuing with frozen backbone only. Error: {exc}"
+                f"WARNING: adapter_path set but Component 1 backend is "
+                f"{encoder.active_backend!r}; LoRA+DANN adapters NOT loaded."
             )
+        else:
+            try:
+                loaded_adapter = load_trainable_state_dict(component1_model, adapter_path)
+                component1_model.loaded_adapter_path = str(loaded_adapter)  # type: ignore[attr-defined]
+                print(f"Component 1: loaded LoRA+DANN adapters from {loaded_adapter}")
+            except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+                print(
+                    "WARNING: failed to load Component 1 adapters from "
+                    f"{adapter_path!r}; continuing with frozen backbone only. Error: {exc}"
+                )
     component2_model = Component2SoftDomainContext(
         backend=str(component2_cfg.get("backend", "auto")),
         weights=str(component2_cfg.get("weights", "densenet121-res224-all")),
@@ -252,6 +260,8 @@ def run_single_image_inference(
     seed: int = 1337,
     component4_decoder_ckpt: str | Path | None = None,
     component1_adapter_path: str | Path | None = None,
+    prebuilt_models: tuple | None = None,
+    prebuilt_moe_models: tuple | None = None,
 ) -> BaselineInferenceBundle:
     config = load_baseline_config(config_path)
     if component4_decoder_ckpt is not None:
@@ -278,10 +288,16 @@ def run_single_image_inference(
         apply_clahe=config.get("component0", {}).get("apply_clahe"),
     )
 
-    component1_model, component2_model, component4_model = build_models(config, device)
+    if prebuilt_models is not None:
+        component1_model, component2_model, component4_model = prebuilt_models
+    else:
+        component1_model, component2_model, component4_model = build_models(config, device)
 
     # Try to build MoE models — returns None if not configured
-    moe_models = build_moe_models(config, device)
+    if prebuilt_moe_models is not None:
+        moe_models = prebuilt_moe_models
+    else:
+        moe_models = build_moe_models(config, device)
     use_moe = moe_models is not None
 
     proposer = BaselineLesionProposer(
