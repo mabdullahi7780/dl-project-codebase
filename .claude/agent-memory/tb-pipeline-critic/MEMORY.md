@@ -1,0 +1,5 @@
+- [Checkpoints Inventory](checkpoints_inventory.md) — exact filenames and sizes of artifacts confirmed present in checkpoints/
+- [Plan Deviation: MoE Implemented](plan_deviation_moe.md) — Components 3/5/6 and upgraded C7/C8 implemented despite plan.md marking them Priority C
+- [Stale SAM ViT-H References](stale_sam_vith_refs.md) — .env.example and mock class name still reference SAM ViT-H after MedSAM ViT-B pivot
+- [Kaggle Dataset Paths](kaggle_dataset_paths.md) — exact /kaggle/input mount candidates encoded in scripts/kaggle_moe_train.py
+- [Component Implementation Status](component_status.md) — confirmed status of each Component 0-10 + baseline proposer

@@ -50,4 +50,4 @@ checkpoints/component1/last_*.pt
 !checkpoints/baseline/.gitkeep
 !checkpoints/reports/.gitkeep
 
-.claude
+# .claude
