@@ -1,0 +1,12 @@
+metric,dataset,value,n,notes
+c1_domain_accuracy,montgomery,0.0,28,
+c1_domain_accuracy,shenzhen,0.0,132,
+c1_domain_accuracy,tbx11k,0.995,200,
+c1_domain_accuracy,nih_cxr14,0.0,200,
+c1_domain_accuracy,overall,0.35535714285714287,560,target=0.25 (chance) after DANN
+c4_lung_dice,montgomery,0.8744675219139555,28,
+c4_lung_iou,montgomery,0.7846353696013731,28,
+c4_lung_dice,shenzhen,0.8320833933738909,110,
+c4_lung_iou,shenzhen,0.722344908646171,110,
+c2_pathology_macro_auroc,nih_cxr14,0.5,200,macro over 8 TB-mimic classes
+moe_lesion_dice,tbx11k,,0,no TBX11K bbox GT matched
