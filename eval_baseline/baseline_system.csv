@@ -1,0 +1,22 @@
+metric,dataset,value,n,notes
+alp_mean,montgomery,17.091328084404267,28,
+alp_std,montgomery,3.8814912307141083,28,
+alp_p50,montgomery,16.51690391977447,28,
+alp_p95,montgomery,24.240442076315762,28,
+alp_mean,shenzhen,20.032178549404012,132,
+alp_std,shenzhen,6.578840471809527,132,
+alp_p50,shenzhen,19.79476323187466,132,
+alp_p95,shenzhen,30.2052073126973,132,
+alp_mean,tbx11k,20.358523766414486,200,
+alp_std,tbx11k,7.7617912443924295,200,
+alp_p50,tbx11k,20.276228787104827,200,
+alp_p95,tbx11k,32.03155810880695,200,
+alp_mean,nih_cxr14,20.838552531131892,200,
+alp_std,nih_cxr14,10.806988264510132,200,
+alp_p50,nih_cxr14,21.343404460574718,200,
+alp_p95,nih_cxr14,39.249020764401536,200,
+timika_auroc,montgomery,0.3928571428571428,28,
+timika_auroc,shenzhen,0.295852534562212,132,
+timika_auroc,tbx11k,,82,only one class present in test split
+timika_auroc,nih_cxr14,,0,no TB/non-TB labels (expected for nih_cxr14)
+report_faithfulness,all,1.0,560,deterministic template floor; MoE will replace with learned generator
