@@ -386,6 +386,16 @@ def load_trainable_state_dict(module: nn.Module, path: str | Path) -> Path:
 
     result = module.load_state_dict(state_dict, strict=False)
     if result.unexpected_keys:
+        # Keys may carry a wrapper prefix (e.g. "encoder." when the adapter was
+        # saved from Component1DANNModel but is now loaded into the raw encoder).
+        # Collect distinct leading components and retry after stripping each.
+        prefixes = {k.split(".", 1)[0] + "." for k in result.unexpected_keys if "." in k}
+        for prefix in prefixes:
+            stripped = {k[len(prefix):]: v for k, v in state_dict.items() if k.startswith(prefix)}
+            if stripped:
+                retry = module.load_state_dict(stripped, strict=False)
+                if not retry.unexpected_keys:
+                    return source
         raise ValueError(
             f"Unexpected keys in adapter file {source}: {result.unexpected_keys[:5]}"
         )
