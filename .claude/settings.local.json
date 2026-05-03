@@ -30,7 +30,8 @@
       "Bash(.venv/Scripts/python -m pytest tests/test_baseline_lesion_proposer.py tests/test_component2.py tests/test_component4_training.py tests/test_infer_contract.py -x -q --tb=short)",
       "Bash(.venv/Scripts/python -c \"import torch; print\\(torch.__version__\\)\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
