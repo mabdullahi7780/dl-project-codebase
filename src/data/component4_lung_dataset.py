@@ -19,6 +19,8 @@ harmonised via Component 0 to produce ``x_3ch`` at 1024x1024 in [0, 1].
 from __future__ import annotations
 
 import csv
+import math
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -162,14 +164,65 @@ def resize_mask_to(mask_uint8: np.ndarray, size: int) -> torch.Tensor:
     return (resized.squeeze(0) > 0.5).to(dtype=torch.float32)  # [1, size, size]
 
 
+def _interleave_by_dataset(records: list[Component4Record]) -> list[Component4Record]:
+    """Round-robin interleave records across datasets so no dataset dominates early batches.
+
+    With shuffle=True in DataLoader this ordering doesn't affect per-epoch randomness,
+    but it guarantees the first epoch's batches are mixed from the start.
+    """
+    grouped: dict[str, list[Component4Record]] = defaultdict(list)
+    for r in records:
+        grouped[r.dataset].append(r)
+    buckets = list(grouped.values())
+    result: list[Component4Record] = []
+    max_len = max(len(b) for b in buckets)
+    for i in range(max_len):
+        for bucket in buckets:
+            if i < len(bucket):
+                result.append(bucket[i])
+    return result
+
+
+def _rotate_tensor_pair(
+    image: torch.Tensor,
+    mask: torch.Tensor,
+    angle_deg: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Rotate image and mask by the same angle using a 2D affine grid.
+
+    image: [C, H, W] float in [0, 1]
+    mask:  [1, H, W] float binary
+    Returns the same shapes, image bilinear-interpolated, mask nearest-neighbour.
+    """
+    angle_rad = math.radians(angle_deg)
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    # Build a [1, 2, 3] affine theta for rotation only (no translation, no scale)
+    theta = torch.tensor(
+        [[cos_a, sin_a, 0.0], [-sin_a, cos_a, 0.0]],
+        dtype=torch.float32,
+    ).unsqueeze(0)
+
+    def _apply(t: torch.Tensor, mode: str) -> torch.Tensor:
+        inp = t.unsqueeze(0)  # [1, C, H, W]
+        grid = F.affine_grid(theta, inp.shape, align_corners=False)
+        out = F.grid_sample(inp, grid, mode=mode, padding_mode="zeros", align_corners=False)
+        return out.squeeze(0)
+
+    rotated_image = _apply(image, "bilinear")
+    rotated_mask = (_apply(mask, "nearest") > 0.5).to(mask.dtype)
+    return rotated_image, rotated_mask
+
+
 class Component4LungDataset(Dataset[dict[str, Any]]):
     """Returns dicts: {x_3ch [3,1024,1024], mask [1,256,256], sample_id, dataset}.
 
-    Fix 4 augmentations (training only, disabled for val/test):
+    Training augmentations (disabled for val/test):
+      - Round-robin interleave by dataset so early batches are always mixed.
       - Random horizontal flip (p=0.5) applied identically to image AND mask.
-      - Random brightness jitter: scale [0.8, 1.2] applied to image pixels only.
-    These increase effective dataset size for Montgomery/Shenzhen (few hundred
-    annotated images) and reduce the Dice gap vs. fully fine-tuned MedSAM.
+      - Random rotation ±rotation_degrees applied identically to image AND mask.
+      - Brightness jitter: multiplicative scale [0.8, 1.2] on image only.
+      - Additive Gaussian noise std=gaussian_noise_std on image only.
     """
 
     def __init__(
@@ -179,13 +232,18 @@ class Component4LungDataset(Dataset[dict[str, Any]]):
         low_res_mask_size: int = LOW_RES_MASK_SIZE,
         apply_clahe: bool | None = None,
         augment: bool = False,
+        rotation_degrees: float = 0.0,
+        gaussian_noise_std: float = 0.0,
     ) -> None:
         if not records:
             raise ValueError("Component4LungDataset received zero records.")
-        self.records = records
+        # Interleave so datasets are mixed regardless of manifest ordering.
+        self.records = _interleave_by_dataset(records) if augment else records
         self.low_res_mask_size = int(low_res_mask_size)
         self.apply_clahe = apply_clahe
         self.augment = augment
+        self.rotation_degrees = float(rotation_degrees)
+        self.gaussian_noise_std = float(gaussian_noise_std)
 
     def __len__(self) -> int:
         return len(self.records)
@@ -202,14 +260,24 @@ class Component4LungDataset(Dataset[dict[str, Any]]):
         x_3ch = harmonised.x_3ch  # [3, 1024, 1024] in [0, 1]
 
         if self.augment:
-            # Horizontal flip: apply to both x_3ch and mask with the same decision.
+            # Horizontal flip applied identically to image and mask.
             if torch.rand(1).item() > 0.5:
                 x_3ch = torch.flip(x_3ch, dims=[2])
                 mask_lowres = torch.flip(mask_lowres, dims=[2])
 
+            # Random rotation applied identically to image and mask.
+            if self.rotation_degrees > 0.0:
+                angle = (torch.rand(1).item() - 0.5) * 2.0 * self.rotation_degrees
+                x_3ch, mask_lowres = _rotate_tensor_pair(x_3ch, mask_lowres, angle)
+
             # Brightness jitter: multiplicative scale in [0.8, 1.2].
             scale = 0.8 + 0.4 * torch.rand(1).item()
             x_3ch = (x_3ch * scale).clamp(0.0, 1.0)
+
+            # Additive Gaussian noise on image only.
+            if self.gaussian_noise_std > 0.0:
+                noise = torch.randn_like(x_3ch) * self.gaussian_noise_std
+                x_3ch = (x_3ch + noise).clamp(0.0, 1.0)
 
         return {
             "x_3ch": x_3ch,

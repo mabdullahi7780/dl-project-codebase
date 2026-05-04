@@ -8,12 +8,15 @@ component4_lung:
   training:
     seed: 1337
     device: null                # null -> auto: CUDA > MPS > CPU. Override with "cuda" / "mps" / "cpu".
-    epochs: 40
+    epochs: 60
     batch_size: 2               # Kaggle T4 16GB-friendly with 1024x1024 inputs; drop to 1 if OOM
     num_workers: 2              # Kaggle tolerates 2; set 0 on MPS/CPU local
-    lr: 1.0e-4
-    weight_decay: 0.0
-    patience: 8                 # early stop on val Dice plateau
+    lr: 3.0e-4                  # higher start LR; cosine schedule decays it to min_lr_factor * lr
+    weight_decay: 1.0e-5
+    patience: 15                # longer patience to let cosine schedule fully work
+    scheduler: cosine           # "cosine" | null (null = flat LR, old behaviour)
+    warmup_epochs: 3            # linear warmup from 0 → lr over this many epochs
+    min_lr_factor: 0.01         # cosine floor = lr * min_lr_factor
     amp: true                   # auto-disabled on MPS/CPU; only applied when device is CUDA
     log_every: 20
     save_every: 1               # also writes last_<save_name> every N epochs
@@ -28,6 +31,6 @@ component4_lung:
     train_manifest: ${COMPONENT4_TRAIN_MANIFEST:-data/splits/component4_manifest.csv}
     val_manifest:   ${COMPONENT4_VAL_MANIFEST:-data/splits/component4_manifest.csv}
     apply_clahe: null           # null -> honor Component 0 per-dataset defaults (Montgomery/Shenzhen = true)
-    # Fix 4: horizontal flip (p=0.5) + brightness jitter [0.8, 1.2] on training split.
-    # Both transforms applied consistently to image and mask.
     augment: true
+    rotation_degrees: 10        # random rotation ±N degrees (applied to image + mask identically)
+    gaussian_noise_std: 0.02    # additive Gaussian noise std on image only; 0.0 to disable

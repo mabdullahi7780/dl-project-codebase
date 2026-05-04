@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,11 +79,19 @@ def _build_loader(
     max_samples: int | None,
     repo_root: Path,
     augment: bool = False,
+    rotation_degrees: float = 0.0,
+    gaussian_noise_std: float = 0.0,
 ) -> DataLoader:
     records = parse_manifest(manifest_path, repo_root=repo_root, split=split)
     if max_samples is not None and max_samples > 0:
         records = records[: int(max_samples)]
-    dataset = Component4LungDataset(records, apply_clahe=apply_clahe, augment=augment)
+    dataset = Component4LungDataset(
+        records,
+        apply_clahe=apply_clahe,
+        augment=augment,
+        rotation_degrees=rotation_degrees,
+        gaussian_noise_std=gaussian_noise_std,
+    )
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -91,6 +101,80 @@ def _build_loader(
         pin_memory=False,
         drop_last=False,
     )
+
+
+def _report_dataset_mix(loader: DataLoader, split: str) -> None:
+    """Print per-dataset sample counts so you can verify mixing before training starts."""
+    counts: Counter[str] = Counter()
+    for record in loader.dataset.records:  # type: ignore[attr-defined]
+        counts[record.dataset] += 1
+    total = sum(counts.values())
+    parts = ", ".join(f"{ds}={n}" for ds, n in sorted(counts.items()))
+    print(f"[{split}] {total} samples — {parts}")
+
+
+class WarmupCosineScheduler:
+    """Linear warmup followed by cosine annealing, applied per-epoch."""
+
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        warmup_epochs: int,
+        total_epochs: int,
+        min_lr_factor: float = 0.01,
+    ) -> None:
+        self.optimizer = optimizer
+        self.warmup_epochs = int(warmup_epochs)
+        self.total_epochs = int(total_epochs)
+        self.min_lr_factor = float(min_lr_factor)
+        self.base_lrs = [pg["lr"] for pg in optimizer.param_groups]
+
+    def step(self, epoch: int) -> float:
+        """Set LR for *epoch* (0-indexed) and return the new LR of the first param group."""
+        if self.warmup_epochs > 0 and epoch < self.warmup_epochs:
+            factor = (epoch + 1) / self.warmup_epochs
+        else:
+            decay_epochs = self.total_epochs - self.warmup_epochs
+            progress = (epoch - self.warmup_epochs) / max(1, decay_epochs)
+            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+            factor = self.min_lr_factor + (1.0 - self.min_lr_factor) * cosine
+        for pg, base_lr in zip(self.optimizer.param_groups, self.base_lrs):
+            pg["lr"] = base_lr * factor
+        return self.optimizer.param_groups[0]["lr"]
+
+
+@torch.no_grad()
+def _threshold_sweep(
+    model: Component4MedSAM,
+    loader: DataLoader,
+    *,
+    device: torch.device,
+    thresholds: list[float] | None = None,
+) -> float:
+    """Try multiple thresholds on the full val set; print a table; return the best."""
+    if thresholds is None:
+        thresholds = [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
+    model.eval()
+    all_logits, all_targets = [], []
+    for batch in loader:
+        x_3ch = batch["x_3ch"].to(device)
+        targets = batch["mask"].to(device)
+        logits = model.forward_logits(x_3ch)
+        all_logits.append(logits.cpu().float())
+        all_targets.append(targets.cpu().float())
+    all_logits = torch.cat(all_logits, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    print("\nThreshold sweep (val set):")
+    best_t, best_dice = thresholds[0], -1.0
+    for t in thresholds:
+        dice, iou = _binary_dice_iou(all_logits, all_targets, threshold=t)
+        marker = " <-- best" if dice > best_dice else ""
+        if dice > best_dice:
+            best_dice, best_t = dice, t
+        print(f"  threshold={t:.2f}  val_dice={dice:.4f}  val_iou={iou:.4f}{marker}")
+    print(f"Recommended mask_threshold: {best_t:.2f}  (val Dice={best_dice:.4f})\n")
+    return best_t
 
 
 def _train_one_epoch(
@@ -276,8 +360,9 @@ def main() -> None:
     val_manifest = data_cfg.get("val_manifest", train_manifest)
 
     apply_clahe = data_cfg.get("apply_clahe")
-    # Fix 4: augmentation enabled for training split when config sets augment=true.
     augment_train = bool(data_cfg.get("augment", False))
+    rotation_degrees = float(data_cfg.get("rotation_degrees", 0.0))
+    gaussian_noise_std = float(data_cfg.get("gaussian_noise_std", 0.0))
     max_train_samples = training_cfg.get("max_train_samples")
     max_val_samples = training_cfg.get("max_val_samples")
 
@@ -291,6 +376,8 @@ def main() -> None:
         max_samples=max_train_samples,
         repo_root=repo_root,
         augment=augment_train,
+        rotation_degrees=rotation_degrees,
+        gaussian_noise_std=gaussian_noise_std,
     )
     val_loader = _build_loader(
         val_manifest,
@@ -303,6 +390,8 @@ def main() -> None:
         repo_root=repo_root,
         augment=False,
     )
+    _report_dataset_mix(train_loader, "train")
+    _report_dataset_mix(val_loader, "val")
 
     model = Component4MedSAM(
         backend=model_cfg.get("backend", "auto"),
@@ -329,6 +418,20 @@ def main() -> None:
     resume_path = args.resume or training_cfg.get("resume_checkpoint")
     start_epoch, best_dice = _maybe_resume(resume_path, model=model, optimizer=optimizer, device=device)
 
+    scheduler: WarmupCosineScheduler | None = None
+    if training_cfg.get("scheduler") == "cosine":
+        scheduler = WarmupCosineScheduler(
+            optimizer,
+            warmup_epochs=int(training_cfg.get("warmup_epochs", 3)),
+            total_epochs=int(training_cfg.get("epochs", 60)),
+            min_lr_factor=float(training_cfg.get("min_lr_factor", 0.01)),
+        )
+        print(
+            f"LR schedule: cosine with {training_cfg.get('warmup_epochs', 3)} warmup epochs, "
+            f"peak lr={training_cfg.get('lr', 5e-5):.2e}, "
+            f"floor lr={float(training_cfg.get('lr', 5e-5)) * float(training_cfg.get('min_lr_factor', 0.01)):.2e}"
+        )
+
     save_dir = Path(training_cfg["save_dir"]).expanduser()
     save_dir.mkdir(parents=True, exist_ok=True)
     best_name = training_cfg.get("save_name", "component4_mask_decoder.pt")
@@ -344,6 +447,11 @@ def main() -> None:
 
     epochs_since_improvement = 0
     for epoch in range(start_epoch, epochs):
+        # Step scheduler before the epoch so warmup affects the very first batch.
+        current_lr = optimizer.param_groups[0]["lr"]
+        if scheduler is not None:
+            current_lr = scheduler.step(epoch)
+
         t0 = time.time()
         train_metrics = _train_one_epoch(
             model,
@@ -359,7 +467,8 @@ def main() -> None:
         val_metrics = _validate(model, val_loader, device=device, threshold=threshold)
         elapsed = time.time() - t0
         print(
-            f"[epoch {epoch}] train loss={train_metrics.loss:.4f} dice={train_metrics.dice:.4f} "
+            f"[epoch {epoch}] lr={current_lr:.2e} "
+            f"train loss={train_metrics.loss:.4f} dice={train_metrics.dice:.4f} "
             f"iou={train_metrics.iou:.4f} | val loss={val_metrics.loss:.4f} "
             f"dice={val_metrics.dice:.4f} iou={val_metrics.iou:.4f} | {elapsed:.1f}s"
         )
@@ -407,6 +516,11 @@ def main() -> None:
             break
 
     print(f"Training complete. Best val Dice={best_dice:.4f}. Checkpoint: {best_path}")
+
+    # Reload best checkpoint and sweep thresholds to find the optimal binary cutoff.
+    best_payload = torch.load(best_path, map_location=device)
+    model.load_decoder_state_dict(best_payload["decoder_state_dict"])
+    _threshold_sweep(model, val_loader, device=device)
 
 
 if __name__ == "__main__":
