@@ -5,16 +5,15 @@ component2_txv:
   training:
     seed: 1337
     device: null
-    epochs: 15
+    epochs: 30
     batch_size: 32
     num_workers: 0
     lr: 5.0e-4
+    weight_decay: 1.0e-5
     temperature: 0.1
-    patience: 5
-    # Fix 1: weight of TB binary BCE loss added to the contrastive objective.
-    # 1.0 means both losses contribute equally; raise to 2.0 if AUROC matters
-    # more than domain separation, lower to 0.5 to keep routing head dominant.
-    tb_head_weight: 1.0
+    patience: 10
+    tb_head_weight: 2.0
+    tb_head_lr_factor: 5.0
     limit_per_domain: null
     save_dir: ${COMPONENT2_SAVE_DIR:-/Volumes/Toshiba HDR/TB_DATA/checkpoints_mirror/component2}
     save_name: component2_routing_head.pt

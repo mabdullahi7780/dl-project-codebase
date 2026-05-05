@@ -5,13 +5,15 @@ component2_txv:
   training:
     seed: 1337
     device: null
-    epochs: 15
+    epochs: 30
     batch_size: 32
     num_workers: 2
     lr: 5.0e-4
+    weight_decay: 1.0e-5
     temperature: 0.1
-    patience: 5
-    tb_head_weight: 1.0
+    patience: 10
+    tb_head_weight: 2.0
+    tb_head_lr_factor: 5.0
     limit_per_domain: null
     save_dir: /kaggle/working/component2_runs
     save_name: component2_routing_head.pt
