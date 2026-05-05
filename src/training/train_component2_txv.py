@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from src.components.component2_txv import Component2SoftDomainContext, supervised_contrastive_loss
@@ -196,6 +197,24 @@ def save_routing_head(model: Component2SoftDomainContext, config: dict[str, Any]
     return save_path
 
 
+def _forward_both_heads(
+    model: Component2SoftDomainContext,
+    x_224: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run backbone once under no_grad, then compute both heads from the same pooled features.
+
+    Backbone is frozen — running it twice per batch (old approach) wastes GPU memory and compute
+    because autograd tracks activations through the frozen layers for no benefit.
+    """
+    with torch.no_grad():
+        features = model.txv_model.features(x_224)
+        pooled = F.adaptive_avg_pool2d(features, (1, 1)).view(features.size(0), -1)
+    domain_ctx_raw = model.domain_routing_head(pooled)
+    domain_ctx = F.normalize(domain_ctx_raw, p=2, dim=1)
+    tb_logits = model.tb_head(pooled)
+    return domain_ctx, tb_logits
+
+
 def train_one_epoch(
     model: Component2SoftDomainContext,
     loader: DataLoader[dict[str, Any]],
@@ -215,10 +234,9 @@ def train_one_epoch(
         tb_labels = batch["tb_label"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
-        domain_ctx, _ = model(x_224)
-        contrastive = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
+        domain_ctx, tb_logits = _forward_both_heads(model, x_224)
 
-        tb_logits = model.forward_tb_logit(x_224)
+        contrastive = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
         tb_loss = tb_bce_loss(tb_logits, tb_labels, pos_weight=pos_weight)
         loss = contrastive + tb_head_weight * tb_loss
 
@@ -253,9 +271,8 @@ def validate_one_epoch(
         domain_targets = batch["domain_id"].to(device)
         tb_labels = batch["tb_label"].to(device)
 
-        domain_ctx, _ = model(x_224)
+        domain_ctx, tb_logits = _forward_both_heads(model, x_224)
         contrastive = supervised_contrastive_loss(domain_ctx, domain_targets, temperature=temperature)
-        tb_logits = model.forward_tb_logit(x_224)
         tb_loss = tb_bce_loss(tb_logits, tb_labels, pos_weight=pos_weight)
         loss = contrastive + tb_head_weight * tb_loss
 
@@ -325,6 +342,13 @@ def main() -> None:
         backend=config["model"]["backend"],
         weights=config["model"]["weights"]
     ).to(device)
+
+    if model.active_backend != "xrv":
+        raise RuntimeError(
+            "Component 2 training requires torchxrayvision (active_backend='xrv'). "
+            "Install it with: pip install torchxrayvision"
+        )
+    print(f"Backend: {model.active_backend} | Device: {device}")
 
     optimizer = build_optimizer(model, config)
     
