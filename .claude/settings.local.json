@@ -31,7 +31,10 @@
       "Bash(.venv/Scripts/python -c \"import torch; print\\(torch.__version__\\)\")",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(python -m pytest tests/test_component4.py tests/test_component4_training.py -x -q)",
+      "Bash(python -m pytest tests/test_component2.py -x -q)",
+      "Bash(python *)"
     ]
   }
 }
