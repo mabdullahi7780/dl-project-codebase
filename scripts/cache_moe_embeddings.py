@@ -233,15 +233,27 @@ def _rasterise_boxes_to_mask(
 
 def _map_tbx_category_to_experts(category_name: str) -> list[str]:
     name = category_name.lower().replace("-", " ").replace("_", " ")
+    name_nospace = name.replace(" ", "")
     matches: list[str] = []
     if any(token in name for token in ("consolid", "infiltrat", "opacity", "pneumon")):
         matches.append("consolidation")
-    if any(token in name for token in ("cavit", "cavity")):
+    if any(token in name for token in ("cavit",)):
         matches.append("cavity")
     if any(token in name for token in ("fibro", "scar", "pleural")):
         matches.append("fibrosis")
     if any(token in name for token in ("nodul", "mass", "granuloma", "lesion")):
         matches.append("nodule")
+    # TBX11K uses CamelCase category names that contain none of the above tokens.
+    # ActiveTuberculosis → active parenchymal disease = consolidation + fibrosis
+    if "activetuberculosis" in name_nospace or ("active" in name and "tuberculosis" in name):
+        for e in ("consolidation", "fibrosis"):
+            if e not in matches:
+                matches.append(e)
+    # ObsoletePulmonaryTuberculosis → fibrotic scarring + calcified nodules
+    if "obsolete" in name and "tuberculosis" in name:
+        for e in ("fibrosis", "nodule"):
+            if e not in matches:
+                matches.append(e)
     return matches
 
 
@@ -385,7 +397,13 @@ def _build_pseudo_targets(
         classifier_weight=classifier_weight,
     )
     lesion_mask = proposal.lesion_mask_coarse_256[0].cpu()
-    prior_mask = lesion_mask if float(lesion_mask.sum().item()) > 0 else lung_mask_256.cpu()
+    if float(lesion_mask.sum().item()) <= 0:
+        # Proposer found no lesion despite passing the suspicion threshold: treat as
+        # weak negative so experts are not trained to paint the whole lung.
+        expert_masks = {name: zero_mask.clone() for name in EXPERT_NAMES}
+        expert_weights = {name: 0.05 for name in EXPERT_NAMES}
+        return zero_mask.clone(), expert_masks, expert_weights, expert_confidences, "weak_negative"
+    prior_mask = lesion_mask
 
     expert_masks: dict[str, torch.Tensor] = {}
     expert_weights: dict[str, float] = {}
@@ -409,12 +427,13 @@ def _build_pseudo_targets(
             prior_mask.squeeze(0),
             min_region_px=12 if name == "cavity" else 24,
         )
-        if name == "cavity":
-            expert_mask = _ringify_mask(expert_mask)
         expert_masks[name] = expert_mask.cpu()
 
-        floor = 0.1 if name == "cavity" else 0.25
-        expert_weights[name] = PSEUDO_DATASET_WEIGHTS[dataset_id] * max(floor, min(confidence, 1.0))
+        if confidence < 0.15:
+            expert_masks[name] = zero_mask.clone()
+            expert_weights[name] = 0.05
+        else:
+            expert_weights[name] = PSEUDO_DATASET_WEIGHTS[dataset_id] * min(confidence, 1.0)
 
     return lesion_mask, expert_masks, expert_weights, expert_confidences, "pseudo_cam"
 
@@ -495,8 +514,6 @@ def _build_tbx_targets(
             lesion_mask.squeeze(0),
             min_region_px=12 if name == "cavity" else 24,
         )
-        if name == "cavity":
-            expert_mask = _ringify_mask(expert_mask)
         expert_masks[name] = expert_mask.cpu()
         expert_weights[name] = 0.75 if float(expert_mask.sum().item()) > 0 else 0.35
 

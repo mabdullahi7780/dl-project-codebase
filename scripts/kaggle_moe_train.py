@@ -69,11 +69,15 @@ MEDSAM_CKPT_CANDIDATES = (
 
 # Optional inputs: previously trained C1 adapters and C4 decoder
 C1_ADAPTER_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/mabdullahi454/tb-pipeline-checkpoints/component1_adapters.safetensors",
+    KAGGLE_INPUT / "mabdullahi454/tb-pipeline-checkpoints/component1_adapters.safetensors",
     KAGGLE_INPUT / "datasets/iahmedhabib/component1-artifacts/component1_adapters.safetensors",
     KAGGLE_INPUT / "component1-artifacts/component1_adapters.safetensors",
     KAGGLE_INPUT / "component1/component1_adapters.safetensors",
 )
 C4_DECODER_CANDIDATES = (
+    KAGGLE_INPUT / "datasets/mabdullahi454/tb-pipeline-checkpoints/component4_mask_decoder.pt",
+    KAGGLE_INPUT / "mabdullahi454/tb-pipeline-checkpoints/component4_mask_decoder.pt",
     KAGGLE_INPUT / "datasets/iahmedhabib/component4-artifacts/component4_mask_decoder.pt",
     KAGGLE_INPUT / "component4-artifacts/component4_mask_decoder.pt",
     KAGGLE_INPUT / "component4/component4_mask_decoder.pt",
@@ -96,7 +100,7 @@ MODE_PRESETS: dict[str, dict[str, object]] = {
         "batch_size": 4,
     },
     "full": {
-        "limit_per_domain": 500,
+        "limit_per_domain": 1000,
         "pretrain_epochs": 10,
         "joint_epochs": 15,
         "critic_epochs": 5,
@@ -159,12 +163,10 @@ def _write_moe_config(
     cfg["component4"]["checkpoint_path"] = str(medsam_ckpt)
     if c1_adapter is not None:
         cfg["component1"]["adapter_path"] = str(c1_adapter)
-    else:
-        cfg["component1"]["adapter_path"] = None
+    # else: preserve whatever path was already in moe.yaml
     if c4_decoder is not None:
         cfg["component4"]["decoder_checkpoint_path"] = str(c4_decoder)
-    else:
-        cfg["component4"]["decoder_checkpoint_path"] = None
+    # else: preserve whatever path was already in moe.yaml
 
     cfg["moe_training"]["save_dir"] = str(save_dir)
     cfg["moe_training"]["pretrain"]["epochs"] = int(preset["pretrain_epochs"])

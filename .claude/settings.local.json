@@ -34,7 +34,8 @@
       "Bash(git push *)",
       "Bash(python -m pytest tests/test_component4.py tests/test_component4_training.py -x -q)",
       "Bash(python -m pytest tests/test_component2.py -x -q)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(python3 *)"
     ]
   }
 }

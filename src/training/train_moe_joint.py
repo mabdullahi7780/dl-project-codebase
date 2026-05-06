@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from src.components.component3_routing import (
     Component3RoutingGate,
@@ -84,6 +84,16 @@ class JointMoEDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.samples)
+
+    def get_balanced_weights(self) -> list[float]:
+        """Return per-sample weights so each dataset contributes equally."""
+        from collections import Counter
+        dataset_ids = [
+            str(p).rsplit("/", 1)[-1].split("__")[0] if isinstance(p, Path) else "synthetic"
+            for p in self.samples
+        ]
+        counts = Counter(dataset_ids)
+        return [1.0 / counts[did] for did in dataset_ids]
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         sample = self.samples[idx]
@@ -215,10 +225,13 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    joint_dataset = JointMoEDataset(cache_dir=cache_dir)
+    sample_weights = joint_dataset.get_balanced_weights()
+    sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
     loader = DataLoader(
-        JointMoEDataset(cache_dir=cache_dir),
+        joint_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=sampler,
         num_workers=int(config.get("moe_training", {}).get("num_workers", 2)),
         pin_memory=True,
         drop_last=False,
