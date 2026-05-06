@@ -95,7 +95,7 @@ component7_moe:
   boundary_critic_checkpoint: checkpoints/component_moe/boundary_critic.pt
 
 moe_cache:
-  pseudo_threshold: 0.45
+  pseudo_threshold: 0.60   # was 0.45 — too permissive; let too many "borderline" images into pseudo_cam path
 
 # ---- Baseline lesion proposer (still available as fallback) ----
 baseline_lesion_proposer:

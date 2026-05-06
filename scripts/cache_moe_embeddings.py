@@ -429,7 +429,9 @@ def _build_pseudo_targets(
         )
         expert_masks[name] = expert_mask.cpu()
 
-        if confidence < 0.15:
+        # Stricter confidence floor (was 0.15 — too permissive; v2 had 100% non-empty per expert).
+        # 0.35 forces TXV to be moderately confident before an expert mask is generated.
+        if confidence < 0.35:
             expert_masks[name] = zero_mask.clone()
             expert_weights[name] = 0.05
         else:

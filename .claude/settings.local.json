@@ -35,7 +35,9 @@
       "Bash(python -m pytest tests/test_component4.py tests/test_component4_training.py -x -q)",
       "Bash(python -m pytest tests/test_component2.py -x -q)",
       "Bash(python *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Read(//Users/ahmedhabib/Downloads/**)",
+      "Read(//Users/ahmedhabib/**)"
     ]
   }
 }
