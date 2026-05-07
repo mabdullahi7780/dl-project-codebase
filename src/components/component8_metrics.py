@@ -39,13 +39,13 @@ def compute_timika_score(
     # Convert to binary
     lesion_bin = (mask_refined > 0.5).astype(np.uint8)  # [1024, 1024]
     lung_bin = (lung_mask > 0.5).astype(np.uint8)       # [1024, 1024]
-    # Cavity threshold raised to 0.85 — Expert 2 sigmoid outputs fire broadly
-    # on lightly-trained weights; only genuinely high-confidence regions should
-    # trigger a cavity diagnosis (prevents false-positive Timika inflation).
+    # Cavity threshold 0.65 — balances sensitivity against FP inflation.
+    # 0.85 was too strict for Phase-1-pretrained weights (sigmoid rarely exceeds
+    # 0.85), causing 0% cavity detection on Shenzhen TB+ cases.
     cavity_bin = (
         np.zeros((256, 256), dtype=np.uint8)
         if mask_e2 is None
-        else (mask_e2 > 0.85).astype(np.uint8)
+        else (mask_e2 > 0.65).astype(np.uint8)
     )
 
     # ALP (Affected Lung Percentage)

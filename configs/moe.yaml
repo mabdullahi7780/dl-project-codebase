@@ -111,8 +111,8 @@ component7_refine:
   opening_iters: 1
   closing_iters: 1
   weak_boundary_threshold: 0.45
-  suppress_fp_threshold: 0.85
-  caution_fp_threshold: 0.65
+  suppress_fp_threshold: 0.70
+  caution_fp_threshold: 0.55
 
 component0:
   min_resolution_px: 512

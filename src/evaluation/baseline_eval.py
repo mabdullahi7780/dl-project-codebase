@@ -262,6 +262,9 @@ def make_test_splits(
         indices = rng.choice(n, size=n_holdout, replace=False)
         indices.sort()
         picked = [items[i] for i in indices]
+        # Shuffle picked so entries[:limit] is a class-balanced random sample,
+        # not the alphabetically-first N images (which for TBX11K are all health/).
+        rng.shuffle(picked)
 
         entries: list[SplitEntry] = []
         for ref in picked:

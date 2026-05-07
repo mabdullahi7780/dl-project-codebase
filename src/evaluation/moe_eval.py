@@ -205,10 +205,7 @@ def _pipeline_forward_moe(
         lung_mask_256=lung.lung_mask_256[0, 0].detach().cpu().numpy().astype(np.uint8),
         lesion_mask_fused_256=(mask_fused_256[0, 0] > fused_thr).detach().cpu().numpy().astype(np.uint8),
         lesion_mask_refined_1024=refined_1024[0].detach().cpu().numpy().astype(np.uint8),
-        # Cavity stat threshold matches compute_timika_score's 0.85 — previously this
-        # was 0.5, so the per-image CSV reported a stricter cavity flag than the actual
-        # cavity_flag value in the same row.
-        cavity_mask_256=(cavity_mask_256[0, 0] > 0.85).detach().cpu().numpy().astype(np.uint8),
+        cavity_mask_256=(cavity_mask_256[0, 0] > 0.65).detach().cpu().numpy().astype(np.uint8),
         routing_weights=routing_dict,
         alp=float(timika.ALP),
         timika_score=float(timika.timika_score),
