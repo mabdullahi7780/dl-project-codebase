@@ -66,11 +66,11 @@ moe_training:
     weight_decay: 1e-4
     scheduler: cosine
     warmup_epochs: 2
-    load_balance_weight: 0.05
+    load_balance_weight: 0.1     # was 0.05 — too weak, gate concentrated on one expert
     expert_aux_weight: 0.5
     mask_loss: bce_dice          # "bce_dice" | "bce" | "dice"
     grl_weight: 0.0              # domain loss (0 = not used in MoE phase)
-    gate_only: false             # co-adapt gate + experts; gate_only=true requires already-good experts
+    gate_only: true              # Phase 1 experts are pretrained; only train routing gate in Phase 2
     resume_from_moe_best: null   # start Phase 2 from Phase 1 pretrained experts
 
   # Phase 3: Boundary critic fine-tuning

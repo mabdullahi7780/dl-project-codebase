@@ -54,7 +54,7 @@ from src.training.train_component1_dann import (
     load_yaml_config,
     maybe_limit_manifest,
 )
-from src.utils.morphology import binary_erode, otsu_threshold, postprocess_binary_mask
+from src.utils.morphology import adaptive_lesion_threshold, binary_erode, postprocess_binary_mask
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -314,7 +314,9 @@ def _score_map_to_mask(
         return torch.zeros((1, score_np.shape[0], score_np.shape[1]), dtype=torch.float32)
 
     score_np = score_np / max_value
-    threshold = otsu_threshold(score_np[prior_np])
+    # floor=0.5 / ceil=0.8: prevents Otsu from picking a threshold below 0.5 on
+    # weak/diffuse CAMs (healthy images), which was causing NIH ALP = 34.8 %.
+    threshold = adaptive_lesion_threshold(score_np[prior_np], floor=0.5, ceil=0.8)
     cleaned = postprocess_binary_mask(
         score_np >= threshold,
         min_area=min_region_px,
@@ -382,11 +384,13 @@ def _build_pseudo_targets(
     }
 
     if suspicious_max < pseudo_threshold:
+        # Hard-negative supervision: explicitly teach every expert that this lung
+        # should be empty.  Weight 0.3 is large enough to create a meaningful
+        # gradient signal (vs the old 0.045–0.09 which was too weak to counter
+        # the positive examples), while still being below the TBX11K weight of
+        # 1.0 so true positives dominate.
         expert_masks = {name: zero_mask.clone() for name in EXPERT_NAMES}
-        expert_weights = {
-            name: PSEUDO_DATASET_WEIGHTS[dataset_id] * (0.1 if name == "cavity" else 0.2)
-            for name in EXPERT_NAMES
-        }
+        expert_weights = {name: 0.3 for name in EXPERT_NAMES}
         return zero_mask.clone(), expert_masks, expert_weights, expert_confidences, "weak_negative"
 
     proposal = proposer.propose(
@@ -398,10 +402,11 @@ def _build_pseudo_targets(
     )
     lesion_mask = proposal.lesion_mask_coarse_256[0].cpu()
     if float(lesion_mask.sum().item()) <= 0:
-        # Proposer found no lesion despite passing the suspicion threshold: treat as
-        # weak negative so experts are not trained to paint the whole lung.
+        # Proposer found no spatial lesion despite passing the suspicion threshold.
+        # Skip entirely (weight=0.0) so experts are not taught contradictory
+        # signals: TXV says TB likely but no spatial evidence found.
         expert_masks = {name: zero_mask.clone() for name in EXPERT_NAMES}
-        expert_weights = {name: 0.05 for name in EXPERT_NAMES}
+        expert_weights = {name: 0.0 for name in EXPERT_NAMES}
         return zero_mask.clone(), expert_masks, expert_weights, expert_confidences, "weak_negative"
     prior_mask = lesion_mask
 
@@ -429,11 +434,14 @@ def _build_pseudo_targets(
         )
         expert_masks[name] = expert_mask.cpu()
 
-        # Stricter confidence floor (was 0.15 — too permissive; v2 had 100% non-empty per expert).
-        # 0.35 forces TXV to be moderately confident before an expert mask is generated.
+        # Per-expert confidence floor.  When TXV is unsure about this expert's
+        # specific pathology class, skip the sample entirely (weight=0.0) rather
+        # than forcing a zero-mask target.  Forcing zero on a TB+ image creates a
+        # direct contradiction ("lesion found globally, but expert X output zero")
+        # that degrades expert specialisation.
         if confidence < 0.35:
             expert_masks[name] = zero_mask.clone()
-            expert_weights[name] = 0.05
+            expert_weights[name] = 0.0   # skip — do not penalise for not firing
         else:
             expert_weights[name] = PSEUDO_DATASET_WEIGHTS[dataset_id] * min(confidence, 1.0)
 
