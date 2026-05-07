@@ -78,3 +78,32 @@ def postprocess_binary_mask(
     cleaned = fill_binary_holes(cleaned)
     cleaned = remove_small_components(cleaned, min_area=min_area)
     return cleaned.astype(bool)
+
+
+def adaptive_lesion_threshold(
+    prob_map: np.ndarray,
+    lung_mask: np.ndarray,
+    *,
+    floor: float = 0.4,
+    ceil: float = 0.7,
+    min_pixels: int = 64,
+) -> float:
+    """Per-image adaptive binarization threshold for the fused lesion probability.
+
+    Otsu inside the lung region, clipped to [floor, ceil]. When the fused map is
+    near-empty (all probabilities below ``floor``) the threshold is pushed to
+    ``ceil`` so under-fired predictions don't survive. This replaces the
+    hardcoded 0.5 used in the MoE inference path, which produced empty masks
+    whenever experts were weakly calibrated.
+    """
+    p = np.asarray(prob_map, dtype=np.float32)
+    p = p[..., 0] if p.ndim == 3 and p.shape[0] == 1 else p
+    l = np.asarray(lung_mask) > 0.5
+    l = l[..., 0] if l.ndim == 3 and l.shape[0] == 1 else l
+    if not l.any():
+        return 0.5
+    in_lung = p[l]
+    if in_lung.size < min_pixels or float(in_lung.max()) < floor:
+        return ceil
+    t = otsu_threshold(in_lung)
+    return float(np.clip(t, floor, ceil))

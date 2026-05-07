@@ -36,6 +36,7 @@ from src.components.component7_verification import (
 from src.components.component8_timika import compute_moe_timika
 from src.core.device import describe_device, pick_device
 from src.core.seed import seed_everything
+from src.utils.morphology import adaptive_lesion_threshold
 from src.evaluation.baseline_eval import (
     DOMAIN_IDS,
     DOMAIN_TO_ID,
@@ -135,9 +136,15 @@ def _pipeline_forward_moe(
     cavity_idx = list(EXPERT_NAMES).index("cavity")
     cavity_mask_256 = fusion_output.expert_masks_256[cavity_idx]  # [1,1,256,256]
 
-    # C7 upgraded: boundary scoring
-    coarse_256 = (mask_fused_256[0] > 0.5).float()   # [1,256,256]
+    # C7 upgraded: boundary scoring. Adaptive threshold (Otsu within lung, clipped)
+    # replaces the hardcoded 0.5; the fused map is sigmoid-output, so 0.5 was a
+    # silent floor that produced empty masks whenever experts under-fired.
     lung_256 = lung.lung_mask_256[0]                  # [1,256,256]
+    fused_thr = adaptive_lesion_threshold(
+        mask_fused_256[0, 0].detach().cpu().numpy(),
+        lung_256[0].detach().cpu().numpy(),
+    )
+    coarse_256 = (mask_fused_256[0] > fused_thr).float()   # [1,256,256]
     heuristic = score_boundary_quality(coarse_256, lung_256, x1024)
     boundary_score = heuristic.boundary_score
     if boundary_critic is not None:
@@ -196,9 +203,12 @@ def _pipeline_forward_moe(
         pathology_probs=torch.sigmoid(txv.pathology_logits).squeeze(0).detach().cpu().numpy(),
         lung_mask_1024=lung.lung_mask_1024[0, 0].detach().cpu().numpy().astype(np.uint8),
         lung_mask_256=lung.lung_mask_256[0, 0].detach().cpu().numpy().astype(np.uint8),
-        lesion_mask_fused_256=(mask_fused_256[0, 0] > 0.5).detach().cpu().numpy().astype(np.uint8),
+        lesion_mask_fused_256=(mask_fused_256[0, 0] > fused_thr).detach().cpu().numpy().astype(np.uint8),
         lesion_mask_refined_1024=refined_1024[0].detach().cpu().numpy().astype(np.uint8),
-        cavity_mask_256=(cavity_mask_256[0, 0] > 0.5).detach().cpu().numpy().astype(np.uint8),
+        # Cavity stat threshold matches compute_timika_score's 0.85 — previously this
+        # was 0.5, so the per-image CSV reported a stricter cavity flag than the actual
+        # cavity_flag value in the same row.
+        cavity_mask_256=(cavity_mask_256[0, 0] > 0.85).detach().cpu().numpy().astype(np.uint8),
         routing_weights=routing_dict,
         alp=float(timika.ALP),
         timika_score=float(timika.timika_score),

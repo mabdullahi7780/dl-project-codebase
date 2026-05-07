@@ -72,7 +72,13 @@ class JointMoEDataset(Dataset):
     training runs.
     """
 
-    def __init__(self, cache_dir: Path | None = None, num_synthetic: int = 200) -> None:
+    def __init__(
+        self,
+        cache_dir: Path | None = None,
+        num_synthetic: int = 200,
+        *,
+        allow_synthetic: bool = False,
+    ) -> None:
         if cache_dir is not None:
             if not cache_dir.exists():
                 raise FileNotFoundError(f"MoE cache directory not found: {cache_dir}")
@@ -80,6 +86,11 @@ class JointMoEDataset(Dataset):
             if not self.samples:
                 raise FileNotFoundError(f"MoE cache directory is empty: {cache_dir}")
         else:
+            if not allow_synthetic:
+                raise ValueError(
+                    "cache_dir is required for production training. "
+                    "Pass --cache-dir, or pass --smoke-test to use synthetic data."
+                )
             self.samples = list(range(num_synthetic))
 
     def __len__(self) -> int:
@@ -132,7 +143,12 @@ class JointMoEDataset(Dataset):
         }
 
 
-def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Path:
+def train_joint(
+    config: dict[str, Any],
+    *,
+    cache_dir: Path | None = None,
+    allow_synthetic: bool = False,
+) -> Path:
     moe_cfg = config.get("moe", {})
     train_cfg = config.get("moe_training", {}).get("joint", {})
 
@@ -225,7 +241,7 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    joint_dataset = JointMoEDataset(cache_dir=cache_dir)
+    joint_dataset = JointMoEDataset(cache_dir=cache_dir, allow_synthetic=allow_synthetic)
     sample_weights = joint_dataset.get_balanced_weights()
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
     loader = DataLoader(
@@ -259,13 +275,19 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
             expert_bank.train()
             fusion.train()
 
-        running = {"mask_loss": 0.0, "expert_loss": 0.0, "lb_loss": 0.0, "total": 0.0}
+        running = {
+            "mask_loss": 0.0,
+            "expert_loss": 0.0,
+            "lb_loss": 0.0,
+            "gate_kl": 0.0,
+            "entropy": 0.0,
+            "total": 0.0,
+        }
         n_batches = 0
 
         for batch in loader:
             emb = batch["image_emb"].to(device)
             domain_ctx = batch["domain_ctx"].to(device)
-            target = batch["lesion_mask"].to(device)
             sample_weight = batch["sample_weight"].to(device)
             expert_target = batch["expert_masks"].to(device)[:, :num_experts]
             expert_weight = batch["expert_weights"].to(device)[:, :num_experts]
@@ -278,9 +300,17 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
                 expert_logits = expert_bank(emb)
                 fusion_out = fusion(expert_logits, routing_weights)
 
+                # Fused-mask supervision: weighted union of per-expert pseudo-masks.
+                # Previously this was the single global lesion_mask, which forced the
+                # gate toward uniform routing (the optimal solution when every routing
+                # decision must reproduce the same target). With the weighted union,
+                # the gate gets a meaningful signal about which expert(s) should fire.
+                ew_norm = expert_weight / expert_weight.sum(dim=1, keepdim=True).clamp_min(1e-6)
+                fused_target = (expert_target * ew_norm[:, :, None, None, None]).sum(dim=1)
+                fused_target = fused_target.clamp(0.0, 1.0)
                 mask_loss = bce_dice_loss(
                     fusion_out.mask_fused_logits,
-                    target,
+                    fused_target,
                     sample_weight=sample_weight,
                 )
 
@@ -297,17 +327,43 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
                     ]
                     expert_loss = torch.stack(expert_loss_terms).mean()
 
+                # Direct gate supervision: build a per-sample target distribution from
+                # per-expert mask area (larger area ⇒ more relevant expert). KL-divergence
+                # against the gate's softmax pulls routing toward the dominant expert
+                # rather than the trivial uniform solution.
+                expert_areas = expert_target.flatten(2).sum(dim=2).squeeze(-1)  # [B, K]
+                gate_target = F.softmax(expert_areas * 2.0, dim=-1)
+                # If a sample has zero per-expert area (weak negative), fall back to uniform.
+                area_sum = expert_areas.sum(dim=-1, keepdim=True)
+                uniform = torch.full_like(gate_target, 1.0 / num_experts)
+                gate_target = torch.where(area_sum > 0, gate_target, uniform)
+                gate_kl = F.kl_div(
+                    routing_weights.clamp_min(1e-6).log(),
+                    gate_target,
+                    reduction="batchmean",
+                )
+
                 lb_loss = routing_load_balance_loss(routing_weights, num_experts=num_experts)
-                total_loss = mask_loss + (expert_aux_weight * expert_loss) + (lb_weight * lb_loss)
+                total_loss = (
+                    mask_loss
+                    + (expert_aux_weight * expert_loss)
+                    + (lb_weight * lb_loss)
+                    + (0.3 * gate_kl)
+                )
 
             optimizer.zero_grad()
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
+            with torch.no_grad():
+                ent = -(routing_weights.clamp_min(1e-6) * routing_weights.clamp_min(1e-6).log()).sum(dim=-1).mean()
+
             running["mask_loss"] += mask_loss.item()
             running["expert_loss"] += expert_loss.item()
             running["lb_loss"] += lb_loss.item()
+            running["gate_kl"] += float(gate_kl.item())
+            running["entropy"] += float(ent.item())
             running["total"] += total_loss.item()
             n_batches += 1
 
@@ -318,7 +374,8 @@ def train_joint(config: dict[str, Any], *, cache_dir: Path | None = None) -> Pat
         history.append(record)
         print(
             f"  epoch {epoch}: total={avg['total']:.4f}  mask={avg['mask_loss']:.4f}  "
-            f"expert={avg['expert_loss']:.4f}  lb={avg['lb_loss']:.4f}"
+            f"expert={avg['expert_loss']:.4f}  lb={avg['lb_loss']:.4f}  "
+            f"gate_kl={avg['gate_kl']:.4f}  entropy={avg['entropy']:.4f}"
         )
 
         if avg["total"] < best_loss:
@@ -370,6 +427,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/moe.yaml")
     parser.add_argument("--cache-dir", default=None, help="Cached embedding directory.")
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--smoke-test", action="store_true",
+                        help="Use synthetic random blobs instead of the cache (smoke tests only).")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -388,7 +447,7 @@ def main() -> None:
         return
 
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
-    train_joint(config, cache_dir=cache_dir)
+    train_joint(config, cache_dir=cache_dir, allow_synthetic=bool(args.smoke_test))
 
 
 if __name__ == "__main__":

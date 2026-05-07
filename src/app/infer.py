@@ -43,7 +43,7 @@ from src.core.device import describe_device, pick_device
 from src.core.seed import seed_everything
 from src.core.types import BaselineInferenceBundle
 from src.utils.checkpoints import compute_file_sha256
-from src.utils.morphology import connected_component_stats
+from src.utils.morphology import adaptive_lesion_threshold, connected_component_stats
 from src.utils.visualization import save_mask_png, save_overlay_png
 
 
@@ -366,8 +366,12 @@ def run_single_image_inference(
 
             # C7 upgraded: keep heuristic diagnostics, but use the trained
             # critic score when a boundary critic checkpoint is available.
-            coarse_mask_256 = (mask_fused_256[0] > 0.5).float()
             lung_mask_256 = lung_output.lung_mask_256[0]
+            fused_thr = adaptive_lesion_threshold(
+                mask_fused_256[0, 0].detach().cpu().numpy(),
+                lung_mask_256[0].detach().cpu().numpy(),
+            )
+            coarse_mask_256 = (mask_fused_256[0] > fused_thr).float()
             heuristic_boundary = score_boundary_quality(coarse_mask_256, lung_mask_256, x1024)
             boundary_score = heuristic_boundary.boundary_score
             if boundary_critic is not None:
