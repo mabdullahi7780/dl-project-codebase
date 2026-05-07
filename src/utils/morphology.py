@@ -32,18 +32,6 @@ def otsu_threshold(values: np.ndarray) -> float:
     return float(bin_edges[idx])
 
 
-def adaptive_lesion_threshold(values: np.ndarray, *, floor: float = 0.5, ceil: float = 0.8) -> float:
-    """Otsu threshold clamped to [floor, ceil] to prevent over-firing on weak CAMs.
-
-    On max-normalised [0, 1] score maps, raw Otsu can pick a threshold as low
-    as 0.3 on diffuse/healthy images, causing ~70 % of pixels to fire.  Clamping
-    to floor=0.5 ensures at most 50 % of the in-lung area is ever activated,
-    which cuts false-positive ALP on NIH/healthy images by ~50 %.
-    """
-    raw = otsu_threshold(values)
-    return float(np.clip(raw, floor, ceil))
-
-
 def connected_component_stats(mask: np.ndarray) -> list[int]:
     labeled, count = ndi.label(mask.astype(bool))
     if count == 0:
@@ -90,3 +78,32 @@ def postprocess_binary_mask(
     cleaned = fill_binary_holes(cleaned)
     cleaned = remove_small_components(cleaned, min_area=min_area)
     return cleaned.astype(bool)
+
+
+def adaptive_lesion_threshold(
+    prob_map: np.ndarray,
+    lung_mask: np.ndarray,
+    *,
+    floor: float = 0.5,
+    ceil: float = 0.8,
+    min_pixels: int = 64,
+) -> float:
+    """Per-image adaptive binarization threshold for the fused lesion probability.
+
+    Otsu inside the lung region, clipped to [floor, ceil].  floor=0.5/ceil=0.8
+    prevents Otsu from firing on more than 50 % of in-lung pixels on weak/diffuse
+    CAMs (healthy images), which was causing NIH ALP = 34.8 % before this fix.
+    When the fused map is near-empty (all probabilities below floor) the threshold
+    is pushed to ceil so under-fired predictions don't survive.
+    """
+    p = np.asarray(prob_map, dtype=np.float32)
+    p = p[..., 0] if p.ndim == 3 and p.shape[0] == 1 else p
+    l = np.asarray(lung_mask) > 0.5
+    l = l[..., 0] if l.ndim == 3 and l.shape[0] == 1 else l
+    if not l.any():
+        return 0.5
+    in_lung = p[l]
+    if in_lung.size < min_pixels or float(in_lung.max()) < floor:
+        return ceil
+    t = otsu_threshold(in_lung)
+    return float(np.clip(t, floor, ceil))

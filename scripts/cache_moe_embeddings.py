@@ -54,7 +54,7 @@ from src.training.train_component1_dann import (
     load_yaml_config,
     maybe_limit_manifest,
 )
-from src.utils.morphology import adaptive_lesion_threshold, binary_erode, postprocess_binary_mask
+from src.utils.morphology import binary_erode, otsu_threshold, postprocess_binary_mask
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -284,9 +284,16 @@ def _class_group_cam(
         return torch.zeros((7, 7), dtype=torch.float32, device=features_7x7.device)
 
     if classifier_weight is None:
-        base = features_7x7.abs().mean(dim=0)
-        scale = sum(float(pathology_probs[idx].item()) for idx in selected_indices) / max(len(selected_indices), 1)
-        return base * scale
+        # Silent fallback would produce an identical spatial pattern for every expert
+        # (only the per-expert scalar would differ), causing all four experts to learn
+        # near-identical pseudo-masks. Hard-fail instead.
+        raise RuntimeError(
+            "classifier_weight is None — TXV classifier head is not loaded, so per-class "
+            "CAMs cannot be computed. Without it every expert would receive the same "
+            "spatial pattern and silently collapse during Phase 1 training. Verify that "
+            "`torchxrayvision` is installed and that the TXV backbone returned a valid "
+            "classifier weight matrix."
+        )
 
     maps: list[torch.Tensor] = []
     for class_index in selected_indices:
@@ -301,30 +308,84 @@ def _class_group_cam(
 
 def _score_map_to_mask(
     score_map_256: torch.Tensor,
-    prior_mask_256: torch.Tensor,
+    spatial_prior_256: torch.Tensor,
     *,
     min_region_px: int,
 ) -> torch.Tensor:
-    score_np = score_map_256.detach().cpu().numpy().astype(np.float32)
-    prior_np = (prior_mask_256.detach().cpu().numpy() > 0.5)
-    score_np = score_np * prior_np.astype(np.float32)
+    """Convert a per-expert CAM into a per-expert binary mask.
 
-    max_value = float(score_np.max())
-    if max_value <= 0.0 or not prior_np.any():
+    The spatial prior (lung mask) is used only to clip the CAM to a plausible
+    region; Otsu is applied to each expert's own CAM distribution so different
+    experts produce genuinely different masks. Previously the prior was the
+    *global* lesion mask and the result was AND-ed with it, which collapsed all
+    four experts to nearly identical shapes.
+    """
+    score_np = score_map_256.detach().cpu().numpy().astype(np.float32)
+    prior_np = (spatial_prior_256.detach().cpu().numpy() > 0.5)
+    if not prior_np.any():
         return torch.zeros((1, score_np.shape[0], score_np.shape[1]), dtype=torch.float32)
 
-    score_np = score_np / max_value
-    # floor=0.5 / ceil=0.8: prevents Otsu from picking a threshold below 0.5 on
-    # weak/diffuse CAMs (healthy images), which was causing NIH ALP = 34.8 %.
-    threshold = adaptive_lesion_threshold(score_np[prior_np], floor=0.5, ceil=0.8)
+    score_in_prior = score_np * prior_np.astype(np.float32)
+    max_value = float(score_in_prior.max())
+    if max_value <= 0.0:
+        return torch.zeros((1, score_np.shape[0], score_np.shape[1]), dtype=torch.float32)
+
+    score_in_prior = score_in_prior / max_value
+    # Clamp Otsu to [0.5, 0.8]: prevents picking a threshold below 0.5 on weak/diffuse
+    # CAMs (healthy images), which was causing NIH ALP = 34.8 % pre-fix.
+    threshold = float(np.clip(otsu_threshold(score_in_prior[prior_np]), 0.5, 0.8))
     cleaned = postprocess_binary_mask(
-        score_np >= threshold,
+        score_in_prior >= threshold,
         min_area=min_region_px,
         opening_iters=1,
         closing_iters=1,
     )
     cleaned &= prior_np
     return torch.from_numpy(cleaned.astype(np.float32)).unsqueeze(0)
+
+
+def _cavity_hotspot_mask(
+    score_map_256: torch.Tensor,
+    spatial_prior_256: torch.Tensor,
+    *,
+    num_peaks: int = 5,
+    dilate_px: int = 8,
+    smooth_sigma: float = 2.0,
+) -> torch.Tensor:
+    """Cavity-specific supervision: top-K hotspots of the CAM, dilated, lung-clipped.
+
+    Cavities are focal radiographic features. Training the cavity expert on the same
+    diffuse lesion blob as the other experts causes it to fire broadly across any
+    pathology; at the 0.85 cavity threshold downstream this overfires and inflates
+    Timika scores. This helper returns a sparse, peak-centred mask instead.
+    """
+    from scipy import ndimage as ndi
+
+    score = score_map_256.detach().cpu().numpy().astype(np.float32)
+    prior = (spatial_prior_256.detach().cpu().numpy() > 0.5)
+    H, W = score.shape
+    if not prior.any():
+        return torch.zeros((1, H, W), dtype=torch.float32)
+    masked = score * prior.astype(np.float32)
+    if masked.max() <= 0.0:
+        return torch.zeros((1, H, W), dtype=torch.float32)
+
+    smoothed = ndi.gaussian_filter(masked, sigma=smooth_sigma)
+    flat = smoothed.ravel()
+    if flat.size <= num_peaks:
+        return torch.zeros((1, H, W), dtype=torch.float32)
+    top_idx = np.argpartition(flat, -num_peaks)[-num_peaks:]
+    peak_mask = np.zeros((H, W), dtype=bool)
+    for idx in top_idx:
+        if flat[idx] <= 0:
+            continue
+        peak_mask[idx // W, idx % W] = True
+    if not peak_mask.any():
+        return torch.zeros((1, H, W), dtype=torch.float32)
+
+    dilated = ndi.binary_dilation(peak_mask, iterations=int(dilate_px))
+    dilated &= prior
+    return torch.from_numpy(dilated.astype(np.float32)).unsqueeze(0)
 
 
 def _ringify_mask(mask_256: torch.Tensor) -> torch.Tensor:
@@ -382,13 +443,16 @@ def _build_pseudo_targets(
         )
         for name in EXPERT_NAMES
     }
+    max_expert_conf = max(expert_confidences.values()) if expert_confidences else 0.0
 
-    if suspicious_max < pseudo_threshold:
-        # Hard-negative supervision: explicitly teach every expert that this lung
-        # should be empty.  Weight 0.3 is large enough to create a meaningful
-        # gradient signal (vs the old 0.045–0.09 which was too weak to counter
-        # the positive examples), while still being below the TBX11K weight of
-        # 1.0 so true positives dominate.
+    # Dual-threshold pass condition: both the global suspicious-class max AND at
+    # least one per-expert confidence must clear pseudo_threshold. A single high
+    # non-expert class (e.g. "effusion") can push suspicious_max above threshold
+    # while all expert-specific classes remain weak — the dual check prevents that.
+    if suspicious_max < pseudo_threshold or max_expert_conf < pseudo_threshold:
+        # Hard-negative supervision: explicitly teach every expert this lung is
+        # empty. Weight 0.3 creates a meaningful gradient (old 0.045–0.09 was too
+        # weak to counter positive examples) while staying below TBX11K weight 1.0.
         expert_masks = {name: zero_mask.clone() for name in EXPERT_NAMES}
         expert_weights = {name: 0.3 for name in EXPERT_NAMES}
         return zero_mask.clone(), expert_masks, expert_weights, expert_confidences, "weak_negative"
@@ -408,7 +472,11 @@ def _build_pseudo_targets(
         expert_masks = {name: zero_mask.clone() for name in EXPERT_NAMES}
         expert_weights = {name: 0.0 for name in EXPERT_NAMES}
         return zero_mask.clone(), expert_masks, expert_weights, expert_confidences, "weak_negative"
-    prior_mask = lesion_mask
+
+    # Each expert's mask is derived from its OWN CAM, clipped to the lung region only.
+    # The global lesion mask is no longer used as a prior here — that was forcing all
+    # four experts onto the same pseudo-shape and causing lock-step Phase-1 collapse.
+    lung_prior_256 = lung_mask_256.squeeze(0).cpu()
 
     expert_masks: dict[str, torch.Tensor] = {}
     expert_weights: dict[str, float] = {}
@@ -427,11 +495,14 @@ def _build_pseudo_targets(
             mode="bilinear",
             align_corners=False,
         ).squeeze(0).squeeze(0)
-        expert_mask = _score_map_to_mask(
-            cam_256,
-            prior_mask.squeeze(0),
-            min_region_px=12 if name == "cavity" else 24,
-        )
+        if name == "cavity":
+            expert_mask = _cavity_hotspot_mask(cam_256, lung_prior_256)
+        else:
+            expert_mask = _score_map_to_mask(
+                cam_256,
+                lung_prior_256,
+                min_region_px=24,
+            )
         expert_masks[name] = expert_mask.cpu()
 
         # Per-expert confidence floor.  When TXV is unsure about this expert's
@@ -498,6 +569,11 @@ def _build_tbx_targets(
         for name in EXPERT_NAMES
     }
 
+    # Experts without an explicit bbox fall through to CAM-based supervision; clip
+    # those CAMs by the lung mask, not by the bbox union, so the per-expert mask is
+    # actually derived from the expert's own CAM (not just a copy of someone else's box).
+    lung_prior_256 = lung_mask_256.squeeze(0).cpu()
+
     expert_masks: dict[str, torch.Tensor] = {}
     expert_weights: dict[str, float] = {}
     for name in EXPERT_NAMES:
@@ -519,11 +595,14 @@ def _build_tbx_targets(
             mode="bilinear",
             align_corners=False,
         ).squeeze(0).squeeze(0)
-        expert_mask = _score_map_to_mask(
-            cam_256,
-            lesion_mask.squeeze(0),
-            min_region_px=12 if name == "cavity" else 24,
-        )
+        if name == "cavity":
+            expert_mask = _cavity_hotspot_mask(cam_256, lung_prior_256)
+        else:
+            expert_mask = _score_map_to_mask(
+                cam_256,
+                lung_prior_256,
+                min_region_px=24,
+            )
         expert_masks[name] = expert_mask.cpu()
         expert_weights[name] = 0.75 if float(expert_mask.sum().item()) > 0 else 0.35
 

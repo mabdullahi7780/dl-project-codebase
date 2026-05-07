@@ -124,26 +124,26 @@ def routing_load_balance_loss(
     *,
     num_experts: int | None = None,
 ) -> torch.Tensor:
-    """Encourage the gate to distribute work evenly across experts.
+    """Dense-MoE load-balance loss (Switch Transformer, soft-fraction variant).
 
-    This is the standard Switch Transformer auxiliary loss: the product
-    of the fraction of tokens routed to each expert and the mean gate
-    probability for that expert, summed over experts and multiplied by
-    ``num_experts`` so the ideal uniform value equals 1.
+    For dense MoE (all experts active) the previous argmax-based fraction term
+    was non-differentiable, so the gate received no gradient toward uniform
+    routing. The soft formulation below uses the per-batch mean gate
+    probability for both factors:
+
+        loss = K * sum_i (p_i^2)
+
+    which is minimised at the uniform distribution p_i = 1/K (giving loss = 1)
+    and grows quadratically as the gate collapses onto fewer experts. Fully
+    differentiable.
 
     Args:
         expert_weights: [B, K] softmax weights from the gate.
         num_experts:    K (inferred from tensor if omitted).
 
     Returns:
-        Scalar loss ≥ 1 (1 when perfectly balanced).
+        Scalar loss ≥ 1 (1 when perfectly balanced, K when fully collapsed).
     """
     K = num_experts or expert_weights.shape[-1]
-    # f_i = fraction of batch where expert i has the highest weight
-    assignments = expert_weights.argmax(dim=-1)  # [B]
-    f = torch.zeros(K, device=expert_weights.device)
-    for i in range(K):
-        f[i] = (assignments == i).float().mean()
-    # p_i = mean probability assigned to expert i across the batch
-    p = expert_weights.mean(dim=0)  # [K]
-    return (K * (f * p).sum())
+    p = expert_weights.mean(dim=0)  # [K]  per-expert mean gate probability
+    return K * (p * p).sum()

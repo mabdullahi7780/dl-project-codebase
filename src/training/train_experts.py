@@ -85,6 +85,7 @@ class ExpertPretrainDataset(Dataset):
         *,
         cache_dir: Path | None = None,
         num_synthetic: int = 200,
+        allow_synthetic: bool = False,
     ) -> None:
         self.expert_name = expert_name
         self.cache_dir = cache_dir
@@ -96,6 +97,11 @@ class ExpertPretrainDataset(Dataset):
             if not self.samples:
                 raise FileNotFoundError(f"MoE cache directory is empty: {cache_dir}")
         else:
+            if not allow_synthetic:
+                raise ValueError(
+                    "cache_dir is required for production training. "
+                    "Pass --cache-dir, or pass --smoke-test to use synthetic data."
+                )
             self.samples = list(range(num_synthetic))
 
     def __len__(self) -> int:
@@ -155,6 +161,7 @@ def train_single_expert(
     *,
     cache_dir: Path | None = None,
     device: torch.device | None = None,
+    allow_synthetic: bool = False,
 ) -> Path:
     """Pretrain a single expert decoder.
 
@@ -179,7 +186,7 @@ def train_single_expert(
         dropout=float(moe_cfg.get("expert_dropout", 0.1)),
     ).to(device)
 
-    dataset = ExpertPretrainDataset(expert_name, cache_dir=cache_dir)
+    dataset = ExpertPretrainDataset(expert_name, cache_dir=cache_dir, allow_synthetic=allow_synthetic)
     sample_weights = dataset.get_balanced_weights()
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
     loader = DataLoader(
@@ -260,6 +267,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--all", action="store_true", help="Train all experts sequentially.")
     p.add_argument("--cache-dir", default=None, help="Pre-computed embedding cache dir.")
     p.add_argument("--epochs", type=int, default=None, help="Override epoch count.")
+    p.add_argument("--smoke-test", action="store_true",
+                   help="Use synthetic random blobs instead of the cache (smoke tests only).")
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
@@ -282,7 +291,13 @@ def main() -> None:
         return
 
     for name in experts_to_train:
-        train_single_expert(name, config, cache_dir=cache_dir, device=device)
+        train_single_expert(
+            name,
+            config,
+            cache_dir=cache_dir,
+            device=device,
+            allow_synthetic=bool(args.smoke_test),
+        )
 
 
 if __name__ == "__main__":
