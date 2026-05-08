@@ -37,7 +37,11 @@
       "Bash(python *)",
       "Bash(python3 *)",
       "Read(//Users/ahmedhabib/Downloads/**)",
-      "Read(//Users/ahmedhabib/**)"
+      "Read(//Users/ahmedhabib/**)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)"
     ]
   }
 }
