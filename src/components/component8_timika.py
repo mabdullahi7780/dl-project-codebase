@@ -39,6 +39,8 @@ def compute_moe_timika(
     lesion_mask_refined_1024: torch.Tensor,
     lung_mask_1024: torch.Tensor,
     cavity_mask_256: torch.Tensor | None = None,
+    *,
+    cavity_threshold: float = 0.65,
 ) -> BaselineTimikaResult:
     """Upgraded Timika computation for the MoE path.
 
@@ -65,6 +67,7 @@ def compute_moe_timika(
             lesion_mask_refined_1024,
             lung_mask_1024,
             cavity_mask_256,
+            cavity_threshold=cavity_threshold,
         )
         confidence = "expert2-radiographic"
     else:

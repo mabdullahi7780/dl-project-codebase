@@ -6,17 +6,24 @@ from typing import Mapping, Union, Any
 def compute_timika_score(
     mask_refined: Union[np.ndarray, torch.Tensor],
     lung_mask: Union[np.ndarray, torch.Tensor],
-    mask_e2: Union[np.ndarray, torch.Tensor, None] = None
+    mask_e2: Union[np.ndarray, torch.Tensor, None] = None,
+    *,
+    cavity_threshold: float = 0.65,
+    cavity_min_area_px: int = 200,
 ) -> dict[str, Union[float, int, str]]:
     """
     Component 8: Compute Metrics - ALP + Cavity Flag + Timika Score
     100% deterministic NumPy. Zero GPU. Zero training.
-    
+
     Args:
         mask_refined: Lesion mask array/tensor, shape [1, 1024, 1024] or [1024, 1024]
         lung_mask: Lung mask array/tensor, shape [1, 1024, 1024] or [1024, 1024]
         mask_e2: Expert 2 (Cavity) mask array/tensor, shape [1, 256, 256] or [256, 256]
-        
+        cavity_threshold: sigmoid threshold for binarising cavity probabilities
+            (default 0.65; exposed for ablation studies).
+        cavity_min_area_px: minimum connected-component size for a cavity
+            region to count toward the +40 Timika bonus (default 200).
+
     Returns:
         A dictionary containing the calculated metrics.
     """
@@ -39,13 +46,13 @@ def compute_timika_score(
     # Convert to binary
     lesion_bin = (mask_refined > 0.5).astype(np.uint8)  # [1024, 1024]
     lung_bin = (lung_mask > 0.5).astype(np.uint8)       # [1024, 1024]
-    # Cavity threshold 0.65 — balances sensitivity against FP inflation.
+    # Cavity threshold default 0.65 — balances sensitivity against FP inflation.
     # 0.85 was too strict for Phase-1-pretrained weights (sigmoid rarely exceeds
     # 0.85), causing 0% cavity detection on Shenzhen TB+ cases.
     cavity_bin = (
         np.zeros((256, 256), dtype=np.uint8)
         if mask_e2 is None
-        else (mask_e2 > 0.65).astype(np.uint8)
+        else (mask_e2 > cavity_threshold).astype(np.uint8)
     )
 
     # ALP (Affected Lung Percentage)
@@ -66,7 +73,7 @@ def compute_timika_score(
         sizes = ndimage.sum(cavity_bin, labeled, range(1, n + 1))
         if np.isscalar(sizes):
             sizes = [sizes]
-        if any(s > 200 for s in sizes):
+        if any(s > cavity_min_area_px for s in sizes):
             cavity_flag = 1
             
     # Timika Score
