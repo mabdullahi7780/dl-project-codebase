@@ -1,0 +1,13 @@
+metric,dataset,value,n,notes
+c1_domain_accuracy,montgomery,0.0,28,
+c1_domain_accuracy,shenzhen,0.0,132,
+c1_domain_accuracy,tbx11k,1.0,200,
+c1_domain_accuracy,nih_cxr14,0.0,200,
+c1_domain_accuracy,overall,0.35714285714285715,560,target=0.25 (chance) after DANN
+c4_lung_dice,montgomery,0.8744675219139555,28,
+c4_lung_iou,montgomery,0.7846353696013731,28,
+c4_lung_dice,shenzhen,0.8320833933738907,110,
+c4_lung_iou,shenzhen,0.722344908646171,110,
+c2_pathology_macro_auroc,nih_cxr14,0.6347292255100809,200,macro over 7 TB-mimic classes
+moe_lesion_dice,tbx11k,0.35469332328241154,14,refined mask vs bbox pseudo-masks
+moe_lesion_iou,tbx11k,0.2210948502546057,14,

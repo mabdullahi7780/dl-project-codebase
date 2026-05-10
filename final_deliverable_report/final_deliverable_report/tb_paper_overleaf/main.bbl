@@ -1,0 +1,141 @@
+\begin{thebibliography}{17}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Cohen et~al.(2022)Cohen, Viviano, Bertin, Morrison, Torabian,
+  Guarrera, Lungren, Chaudhari, Brooks, Hashir, and
+  Bertrand]{cohen2022torchxrayvision}
+Cohen, J.~P., Viviano, J.~D., Bertin, P., Morrison, P., Torabian, P., Guarrera,
+  M., Lungren, M.~P., Chaudhari, A., Brooks, R., Hashir, M., and Bertrand, H.
+\newblock {TorchXRayVision}: A library of chest x-ray datasets and models.
+\newblock In \emph{Medical Imaging with Deep Learning (MIDL)}, 2022.
+
+\bibitem[Dosovitskiy et~al.(2021)Dosovitskiy, Beyer, Kolesnikov, Weissenborn,
+  Zhai, Unterthiner, Dehghani, Minderer, Heigold, Gelly, Uszkoreit, and
+  Houlsby]{dosovitskiy2021vit}
+Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X.,
+  Unterthiner, T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S.,
+  Uszkoreit, J., and Houlsby, N.
+\newblock An image is worth {16x16} words: Transformers for image recognition
+  at scale.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2021.
+
+\bibitem[Ganin et~al.(2016)Ganin, Ustinova, Ajakan, Germain, Larochelle,
+  Laviolette, Marchand, and Lempitsky]{ganin2016domain}
+Ganin, Y., Ustinova, E., Ajakan, H., Germain, P., Larochelle, H., Laviolette,
+  F., Marchand, M., and Lempitsky, V.
+\newblock Domain-adversarial training of neural networks.
+\newblock \emph{Journal of Machine Learning Research}, 17\penalty0
+  (59):\penalty0 1--35, 2016.
+
+\bibitem[He et~al.(2016)He, Zhang, Ren, and Sun]{he2016resnet}
+He, K., Zhang, X., Ren, S., and Sun, J.
+\newblock Deep residual learning for image recognition.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, pp.\  770--778, 2016.
+
+\bibitem[Hu et~al.(2022)Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and
+  Chen]{hu2022lora}
+Hu, E.~J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., and
+  Chen, W.
+\newblock {LoRA}: Low-rank adaptation of large language models.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2022.
+
+\bibitem[Huang et~al.(2017)Huang, Liu, Van Der~Maaten, and
+  Weinberger]{huang2017densenet}
+Huang, G., Liu, Z., Van Der~Maaten, L., and Weinberger, K.~Q.
+\newblock Densely connected convolutional networks.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, pp.\  4700--4708, 2017.
+
+\bibitem[Jaeger et~al.(2014)Jaeger, Candemir, Antani, W{\'a}ng, Lu, and
+  Thoma]{jaeger2014shenzhen}
+Jaeger, S., Candemir, S., Antani, S., W{\'a}ng, Y.-X.~J., Lu, P.-X., and Thoma,
+  G.
+\newblock Two public chest x-ray datasets for computer-aided screening of
+  pulmonary diseases.
+\newblock \emph{Quantitative Imaging in Medicine and Surgery}, 4\penalty0
+  (6):\penalty0 475--477, 2014.
+
+\bibitem[Kirillov et~al.(2023)Kirillov, Mintun, Ravi, Mao, Rolland, Gustafson,
+  Xiao, Whitehead, Berg, Lo, Doll{\'a}r, and Girshick]{kirillov2023sam}
+Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., Xiao,
+  T., Whitehead, S., Berg, A.~C., Lo, W.-Y., Doll{\'a}r, P., and Girshick, R.
+\newblock Segment anything.
+\newblock In \emph{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision (ICCV)}, pp.\  4015--4026, 2023.
+
+\bibitem[Liu et~al.(2020)Liu, Wu, Ban, Wang, and Cheng]{liu2020tbx11k}
+Liu, Y., Wu, Y.-H., Ban, Y., Wang, H., and Cheng, M.-M.
+\newblock Rethinking computer-aided tuberculosis diagnosis.
+\newblock In \emph{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition (CVPR)}, pp.\  2646--2655, 2020.
+
+\bibitem[Ma et~al.(2024)Ma, He, Li, Han, You, and Wang]{ma2024medsam}
+Ma, J., He, Y., Li, F., Han, L., You, C., and Wang, B.
+\newblock Segment anything in medical images.
+\newblock \emph{Nature Communications}, 15\penalty0 (1):\penalty0 654, 2024.
+
+\bibitem[Otsu(1979)]{otsu1979threshold}
+Otsu, N.
+\newblock A threshold selection method from gray-level histograms.
+\newblock \emph{IEEE Transactions on Systems, Man, and Cybernetics}, 9\penalty0
+  (1):\penalty0 62--66, 1979.
+
+\bibitem[Ralph et~al.(2010)Ralph, Ardian, Wiguna, Maguire, Becker, Drogumuller,
+  Wilks, Waramori, Tjitra, Sandjaja, Kenagalem, Pontororing, Anstey, and
+  Kelly]{ralph2013timika}
+Ralph, A.~P., Ardian, M., Wiguna, A., Maguire, G.~P., Becker, N.~G.,
+  Drogumuller, G., Wilks, M.~J., Waramori, G., Tjitra, E., Sandjaja, Kenagalem,
+  E., Pontororing, G.~J., Anstey, N.~M., and Kelly, P.~M.
+\newblock A simple, valid, numerical score for grading chest x-ray severity in
+  adult smear-positive pulmonary tuberculosis.
+\newblock \emph{Thorax}, 65\penalty0 (10):\penalty0 863--869, 2010.
+
+\bibitem[Ronneberger et~al.(2015)Ronneberger, Fischer, and
+  Brox]{ronneberger2015unet}
+Ronneberger, O., Fischer, P., and Brox, T.
+\newblock {U-Net}: Convolutional networks for biomedical image segmentation.
+\newblock In \emph{International Conference on Medical Image Computing and
+  Computer-Assisted Intervention (MICCAI)}, pp.\  234--241. Springer, 2015.
+
+\bibitem[Selvaraju et~al.(2017)Selvaraju, Cogswell, Das, Vedantam, Parikh, and
+  Batra]{selvaraju2017gradcam}
+Selvaraju, R.~R., Cogswell, M., Das, A., Vedantam, R., Parikh, D., and Batra,
+  D.
+\newblock {Grad-CAM}: Visual explanations from deep networks via gradient-based
+  localization.
+\newblock In \emph{Proceedings of the IEEE International Conference on Computer
+  Vision (ICCV)}, pp.\  618--626, 2017.
+
+\bibitem[Shazeer et~al.(2017)Shazeer, Mirhoseini, Maziarz, Davis, Le, Hinton,
+  and Dean]{fedorov2017switch}
+Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q., Hinton, G., and
+  Dean, J.
+\newblock Outrageously large neural networks: The sparsely-gated
+  mixture-of-experts layer.
+\newblock \emph{International Conference on Learning Representations (ICLR)},
+  2017.
+
+\bibitem[Wang et~al.(2017)Wang, Peng, Lu, Lu, Bagheri, and
+  Summers]{wang2017nihcxr}
+Wang, X., Peng, Y., Lu, L., Lu, Z., Bagheri, M., and Summers, R.~M.
+\newblock {ChestX-ray8}: Hospital-scale chest x-ray database and benchmarks on
+  weakly-supervised classification and localization of common thorax diseases.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, pp.\  2097--2106, 2017.
+
+\bibitem[{World Health Organization}(2024)]{who2024tb}
+{World Health Organization}.
+\newblock Global tuberculosis report 2024.
+\newblock
+  \url{https://www.who.int/teams/global-tuberculosis-programme/tb-reports/global-tuberculosis-report-2024},
+  2024.
+\newblock Accessed: 2025.
+
+\end{thebibliography}

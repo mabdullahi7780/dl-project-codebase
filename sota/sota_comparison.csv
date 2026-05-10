@@ -1,0 +1,8 @@
+method,source,metric,dataset,value,notes
+Liu et al. 2020 (TBX11K classifier),paper,TB AUROC,TBX11K,0.958,reported best detection AUC
+Liu et al. 2020 (TBX11K bbox detector),paper,mAP@0.5,TBX11K,0.508,TB-X box detection (different metric — referenced for context)
+MedSAM zero-shot (Ma 2024),paper,Lung Dice,Shenzhen,0.85,reported approx — CXR lung segmentation
+MedSAM zero-shot (Ma 2024),paper,Lung Dice,Montgomery,0.85,reported approx — CXR lung segmentation
+Raw TXV (Cohen 2022) TB-mimic max,this notebook,TB AUROC,Montgomery,0.5816326530612246,"no fine-tuning; max(Consolidation,Infiltration)"
+Raw TXV (Cohen 2022) TB-mimic max,this notebook,TB AUROC,Shenzhen,0.6900921658986175,"no fine-tuning; max(Consolidation,Infiltration)"
+Raw TXV (Cohen 2022) TB-mimic max,this notebook,TB AUROC,TBX11K,0.3458874458874459,"no fine-tuning; max(Consolidation,Infiltration)"

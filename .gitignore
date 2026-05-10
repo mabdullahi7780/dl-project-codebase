@@ -50,4 +50,14 @@ checkpoints/component1/last_*.pt
 !checkpoints/baseline/.gitkeep
 !checkpoints/reports/.gitkeep
 
-# .claude
+# Claude Code local state
+.claude/
+
+# macOS metadata embedded in extracted zips
+**/__MACOSX/
+
+# Local NIH index cache (regenerable, ~18 MB per ablation variant)
+**/_nih_index_cache.json
+
+# Re-buildable Overleaf bundle (sources + figures are tracked separately)
+final_deliverable_report/final_deliverable_report/tb_paper_overleaf.zip

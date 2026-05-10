@@ -1,0 +1,34 @@
+{
+  "pipeline": "moe",
+  "device": "cuda:Tesla T4",
+  "seed": 42,
+  "holdout_frac": 0.2,
+  "limit_per_domain": 200,
+  "counts": {
+    "manifest": {
+      "montgomery": 138,
+      "shenzhen": 662,
+      "tbx11k": 8976,
+      "nih_cxr14": 112120
+    },
+    "test_split": {
+      "montgomery": 28,
+      "shenzhen": 132,
+      "tbx11k": 200,
+      "nih_cxr14": 200
+    },
+    "ran_ok": 560,
+    "skipped": 0
+  },
+  "ground_truth_coverage": {
+    "nih_multilabels_indexed": 112120,
+    "tbx_bbox_images_indexed": 799,
+    "shenzhen_masks_found": true
+  },
+  "skipped_samples": [],
+  "output_files": {
+    "components_csv": "/kaggle/working/eval_moe/moe_components.csv",
+    "system_csv": "/kaggle/working/eval_moe/moe_system.csv",
+    "per_image_csv": "/kaggle/working/eval_moe/moe_per_image.csv"
+  }
+}

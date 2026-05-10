@@ -1,0 +1,65 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%    This is a modified version of the ICML 2021 template     %%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%% Link: https://www.overleaf.com/latex/templates/icml2021-template/dsftnbmjgyhv %%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\usepackage{booktabs}
+
+\usepackage{hyperref}
+
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+\usepackage[accepted]{icml2021}
+
+\begin{document}
+
+\twocolumn[
+\icmltitle{Insert title here}
+
+\begin{icmlauthorlist}
+\icmlauthor{Student 1}{}
+\icmlauthor{Student 2}{}
+\icmlauthor{Student 3}{}
+\end{icmlauthorlist}
+
+\icmlkeywords{Machine Learning, ICML}
+
+\vskip 0.3in
+]
+
+
+\begin{abstract}
+\textit{The purpose of an abstract is to summarize the entire paper in a nutshell. Provide information regarding the project domain, the current problem, your solution, and then quote your direct improvements against SoTA on key datasets. You can also summarize the main mechanism by which you are bringing about an improvement over the baseline.}
+\end{abstract}
+
+\section{Introduction}
+\textit{This section is supposed to set up knowledge of the problem domain so that any reader is able to catch on to the problem. This is where your SoTA survey plays a key role in describing the domain, it's problems, several past techniques or baselines that have tried to fix the problem and the gap that still exists. Slowly introduce your main idea and provide a list of goals that your paper aims to achieve.}
+
+\section{Methodology}
+\textit{This part of the paper is extremely important as it lays down the architecture of your improvements, and your primary experiments. Build up your methodology in terms of providing a concise problem formulation, your solution and any algorithms, theory, proofs that go along with it. Make sure the method is laid out in the order of a pyramid: improvements that stack up on each other are detailed in sequence. Feel free to have diagrams, algorithms, images etc. that can concisely convey your point as well.}
+
+\textit{This section will also highlight your primary experiments, where you have to identify your baselines, datasets, choice of models, and metrics that you are focusing on to make your comparison. Make sure to provide a list of hyperparameters as well if your results are sensitive. Feel free to add any other experiments you wish to run that are major in scale.}
+
+\section{Results}
+\textit{This section is essential in terms of actually demonstrating your improvements via tables, figures, graphs. You will summarize key findings, and your improvements over the baseline along with any trends that support or negate your hypotheses. }
+
+\section{Discussion}
+\textit{The purpose of this section is to discuss the causes and reasons for your improvements. This can be supported via multiple ablation studies or different experiments that analyze your novelty. You can also detail any shortcomings in your research which might attribute to some negative or positive results but primarily should be in favor of 'explaining' why your method works, what is specifically making it work, and how the method might work in different settings as well to boost your claims.}
+
+\section{Conclusion}
+\textit{Use the conclusion to identify any remaining gaps and limitations throughout your work. Summarize your key findings and what should be the focus of research regarding this topic in the future knowing the information that you know now.}
+
+\section{Tips for Writing (remove after reading)}
+For \textit{Bibliography}: please populate the \texttt{main.bib} file with your references and cite them in your paper using \texttt{cite}.
+
+General: Please reference key results, figures, table using \texttt{label} and \texttt{ref}. Make your sure everything is legible, and no figures overflow the document. Poorly formatted papers will be negatively graded. Please refrain from using any AI for writing purposes.
+
+\bibliography{example_paper}
+\bibliographystyle{icml2021}
+
+\end{document}

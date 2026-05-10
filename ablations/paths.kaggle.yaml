@@ -1,0 +1,11 @@
+artifacts:
+  notebook_cache: /kaggle/working/ablations/cache
+  processed: /kaggle/working/ablations/processed
+  reports: /kaggle/working/ablations/reports
+datasets:
+  montgomery: /kaggle/input/datasets/iahmedhabib/montgomery/montgomery
+  nih_cxr14: /kaggle/input/datasets/organizations/nih-chest-xrays/data
+  shenzhen: /kaggle/input/datasets/iahmedhabib/shehzhenn/shenzhen
+  tbx11k: /kaggle/input/datasets/usmanshams/tbx-11/TBX11K
+external_data_root: /kaggle/input
+project_root: /kaggle/working/repo

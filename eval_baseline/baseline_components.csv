@@ -1,0 +1,13 @@
+metric,dataset,value,n,notes
+c1_domain_accuracy,montgomery,0.0,28,
+c1_domain_accuracy,shenzhen,0.0,132,
+c1_domain_accuracy,tbx11k,0.0,200,
+c1_domain_accuracy,nih_cxr14,1.0,200,
+c1_domain_accuracy,overall,0.35714285714285715,560,target=0.25 (chance) after DANN; >0.25 means encoder is still domain-biased
+c4_lung_dice,montgomery,0.8862138046573336,28,
+c4_lung_iou,montgomery,0.8033496389872637,28,
+c4_lung_dice,shenzhen,0.9591841217833934,110,
+c4_lung_iou,shenzhen,0.9221970316583391,110,
+c2_pathology_macro_auroc,nih_cxr14,0.6347292255100809,200,macro over 7 TB-mimic classes
+lesion_proposer_dice,tbx11k,0.31544201585828485,14,vs. bbox-rasterised pseudo-masks — baseline ceiling for MoE
+lesion_proposer_iou,tbx11k,0.2031433142205615,14,

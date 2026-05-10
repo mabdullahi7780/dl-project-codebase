@@ -1,0 +1,108 @@
+baseline_lesion_proposer:
+  closing_iters: 1
+  fallback_blend: 0.35
+  fixed_binary_threshold: null
+  min_region_px: 48
+  opening_iters: 1
+  suspicious_class_threshold: 0.55
+component0:
+  aspect_ratio_range:
+  - 0.7
+  - 1.4
+  clahe:
+    clip_limit: 2.0
+    default_by_dataset:
+      montgomery: true
+      nih_cxr14: false
+      shenzhen: true
+      tbx11k: false
+    tile_grid_size:
+    - 8
+    - 8
+  min_resolution_px: 512
+  x1024_size: 1024
+  x224_size: 224
+component1:
+  adapter_path: /kaggle/working/repo/checkpoints/component1/component1_adapters.safetensors
+  backend: auto
+  checkpoint_path: /kaggle/input/datasets/iahmedhabib/medsam-vit-b/medsam_vit_b.pth
+component10:
+  backend: template
+  fall_back_on_load_error: true
+  fall_back_on_unfaithful: true
+  model_name: microsoft/BioGPT-Large
+  use_mock: false
+component2:
+  backend: auto
+  pathology_flag_threshold: 0.6
+  routing_head_path: /kaggle/working/repo/checkpoints/component2/component2_routing_head.pt
+  weights: densenet121-res224-all
+component4:
+  backend: auto
+  checkpoint_path: /kaggle/input/datasets/iahmedhabib/medsam-vit-b/medsam_vit_b.pth
+  decoder_checkpoint_path: /kaggle/working/repo/checkpoints/component4/component4_mask_decoder.pt
+  mask_threshold: 0.5
+  model_type: vit_b
+component7_moe:
+  boundary_critic_checkpoint: /kaggle/working/repo/checkpoints/component_moe/boundary_critic.pt
+  boundary_threshold: 0.7
+  num_prompt_points: 5
+  variance_threshold: 0.3
+component7_refine:
+  caution_fp_threshold: 0.55
+  closing_iters: 1
+  min_area_px: 48
+  opening_iters: 1
+  suppress_fp_threshold: 0.7
+  weak_boundary_threshold: 0.45
+moe:
+  checkpoint_path: /kaggle/working/repo/checkpoints/component_moe/moe_best.pt
+  domain_ctx_dim: 256
+  enabled: true
+  expert_dropout: 0.1
+  expert_in_channels: 256
+  expert_mid_channels: 128
+  fusion_mode: weighted_logit
+  learnable_fusion_bias: false
+  num_experts: 4
+  routing_temperature: 0.25
+  routing_top_k: null
+  use_domain_ctx: true
+moe_cache:
+  pseudo_threshold: 0.6
+moe_training:
+  amp: true
+  boundary_critic:
+    batch_size: 16
+    epochs: 5
+    freeze_blocks_1_to_3: true
+    lr: 1e-3
+    pretrained: false
+  device: null
+  joint:
+    batch_size: 4
+    epochs: 12
+    expert_aux_weight: 0.5
+    gate_only: true
+    grl_weight: 0.0
+    load_balance_weight: 0.1
+    lr_experts: 5e-5
+    lr_fusion: 5e-5
+    lr_gate: 5e-4
+    mask_loss: bce_dice
+    resume_from_moe_best: null
+    scheduler: cosine
+    warmup_epochs: 2
+    weight_decay: 1e-4
+  num_workers: 2
+  pretrain:
+    batch_size: 4
+    epochs: 10
+    lr: 1e-4
+    scheduler: cosine
+    warmup_epochs: 1
+    weight_decay: 1e-4
+  save_dir: outputs/moe_runs
+  save_every: 2
+runtime:
+  device: cuda

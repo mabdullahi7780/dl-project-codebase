@@ -1,0 +1,26 @@
+metric,dataset,value,n,notes
+alp_mean,montgomery,59.75946844420038,28,
+alp_std,montgomery,5.674805049719255,28,
+alp_p50,montgomery,60.39520736897393,28,
+alp_p95,montgomery,66.52108668734878,28,
+alp_mean,shenzhen,46.980976152492616,132,
+alp_std,shenzhen,12.228850534410073,132,
+alp_p50,shenzhen,47.35123027891163,132,
+alp_p95,shenzhen,66.56135534761552,132,
+alp_mean,tbx11k,30.725229438325286,200,
+alp_std,tbx11k,19.01079453436987,200,
+alp_p50,tbx11k,25.890451825850676,200,
+alp_p95,tbx11k,64.57345389777637,200,
+alp_mean,nih_cxr14,38.19032603452978,200,
+alp_std,nih_cxr14,16.30457282266806,200,
+alp_p50,nih_cxr14,37.81827830044319,200,
+alp_p95,nih_cxr14,63.67419354597031,200,
+timika_auroc,montgomery,0.33163265306122447,28,
+timika_auroc,shenzhen,0.5552995391705069,132,
+timika_auroc,tbx11k,0.774025974025974,179,
+timika_auroc,nih_cxr14,,0,no TB/non-TB labels (expected for nih_cxr14)
+tb_head_auroc,montgomery,0.6479591836734694,28,
+tb_head_auroc,shenzhen,0.8511520737327188,132,
+tb_head_auroc,tbx11k,0.8116883116883118,179,
+tb_head_auroc,nih_cxr14,,0,no TB/non-TB labels
+report_faithfulness,all,1.0,560,deterministic template floor; MoE will replace with learned generator

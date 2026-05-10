@@ -1,0 +1,82 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{who2024tb}
+\citation{liu2020tbx11k}
+\citation{cohen2022torchxrayvision}
+\citation{ralph2013timika}
+\citation{jaeger2014shenzhen}
+\citation{jaeger2014shenzhen}
+\citation{liu2020tbx11k}
+\citation{wang2017nihcxr}
+\citation{liu2020tbx11k}
+\citation{cohen2022torchxrayvision}
+\citation{huang2017densenet}
+\citation{ma2024medsam}
+\citation{kirillov2023sam}
+\citation{ronneberger2015unet}
+\citation{ganin2016domain}
+\citation{dosovitskiy2021vit}
+\citation{hu2022lora}
+\citation{fedorov2017switch}
+\citation{ralph2013timika}
+\citation{ma2024medsam,kirillov2023sam}
+\citation{hu2022lora}
+\citation{ganin2016domain}
+\citation{cohen2022torchxrayvision,huang2017densenet}
+\citation{selvaraju2017gradcam}
+\citation{otsu1979threshold}
+\newlabel{fig:pipeline}{{1}{3}{System overview. Multi-dataset CXRs pass through QC and CLAHE normalisation, then through the shared MedSAM encoder. The MoE path routes the image embedding to four pathology-specialised experts whose outputs are fused, refined, and combined with the lung mask to produce the Timika severity score}{figure.1}{}}
+\newlabel{fig:lung_quality}{{2}{3}{Lung mask quality on two Montgomery and two Shenzhen TB-negative cases. Columns: input CXR, ground-truth lung, predicted lung. The fine-tuned decoder hugs the costophrenic angles and diaphragmatic outline; this precision matters because the lung mask is the denominator of the ALP in Equation~\ref {eq:alp}}{figure.2}{}}
+\newlabel{eq:alp}{{1}{3}{}{equation.1}{}}
+\newlabel{sec:moe}{{3.7}{3}{}{subsection.3.7}{}}
+\newlabel{eq:routing}{{2}{3}{}{equation.2}{}}
+\citation{he2016resnet}
+\citation{liu2020tbx11k}
+\citation{ma2024medsam}
+\citation{liu2020tbx11k}
+\citation{ma2024medsam}
+\newlabel{eq:fusion}{{3}{4}{}{equation.3}{}}
+\newlabel{eq:timika}{{4}{4}{}{equation.4}{}}
+\newlabel{tab:datasets}{{1}{4}{Datasets used in this study. NIH-CXR14 carries no TB labels and is used only for ALP calibration on healthy controls}{table.1}{}}
+\newlabel{tab:main_results}{{2}{5}{Main results comparing our baseline (Grad-CAM) and MoE paths against published benchmarks. $\dagger $Liu et al.\ \cite {liu2020tbx11k}. $\ddagger $MedSAM zero-shot \cite {ma2024medsam}. $^\S $Optimised cavity threshold (Section~\ref {sec:abl_C}); production config yields 0.613}{table.2}{}}
+\newlabel{fig:lesion_comparison}{{3}{6}{Lesion mask comparison. Six cases spanning TBX11K TB+ with bbox ground truth, Shenzhen TB+, and NIH-CXR14 healthy controls. Columns: CXR, lung mask, baseline Grad-CAM lesion (red), MoE fused lesion (green), TBX11K bbox GT (yellow, where available). The MoE produces more focal and anatomically plausible lesion maps than the diffuse Grad-CAM baseline; on healthy NIH cases (rows 5--6) the MoE fires minimally, confirming the improved specificity reported quantitatively}{figure.3}{}}
+\newlabel{fig:dataset_dists}{{4}{6}{Per-dataset distributions. (a) MoE ALP shifts toward zero relative to the baseline (Montgomery $\mu = 22.1$, Shenzhen $\mu = 37.8$, TBX11K $\mu = 28.6$, NIH-healthy $\mu = 22.6$). (b) The gate routes interpretably: fibrosis dominates on TBX11K, cavity routing tracks dataset cavitation prevalence}{figure.4}{}}
+\citation{liu2020tbx11k}
+\citation{cohen2022torchxrayvision}
+\citation{cohen2022torchxrayvision}
+\citation{ma2024medsam}
+\citation{ma2024medsam}
+\newlabel{fig:expert_spec}{{5}{7}{Per-expert specialisation on three Shenzhen TB-positive cases. Columns: CXR, then per-expert sigmoid probability maps for consolidation, cavity, fibrosis, and nodule (with routing weight $w$ in title)}{figure.5}{}}
+\newlabel{sec:sota}{{5}{7}{}{section.5}{}}
+\newlabel{tab:sota}{{3}{7}{Comparison against prior work, pivoted by metric. Best per row in bold. Liu et al.\ additionally report bbox mAP$@0.5 = 0.508$ on TBX11K, omitted here because we do not predict boxes}{table.3}{}}
+\newlabel{sec:ablations}{{6}{7}{}{section.6}{}}
+\newlabel{sec:abl_secondary}{{6.1}{7}{}{subsection.6.1}{}}
+\newlabel{tab:abl_combined}{{4}{7}{Combined secondary ablations. Each block varies a single knob from the production configuration}{table.4}{}}
+\newlabel{sec:abl_C}{{6.2}{7}{}{subsection.6.2}{}}
+\newlabel{tab:abl_cav}{{5}{8}{Ablation C: cavity threshold $\tau _{\text {cav}}$. The non-monotonic response is the paper's headline ablation finding}{table.5}{}}
+\newlabel{fig:cavity}{{6}{8}{Cavity detection on three Shenzhen TB-positive cases. Columns: CXR, Expert\,2 cavity probability (heat), cavity binary mask at $\tau _{\text {cav}} = 0.65$. The probability maps localise air-space-like regions in the upper-zone parenchyma, the canonical cavitation distribution}{figure.6}{}}
+\newlabel{sec:failures}{{7}{8}{}{section.7}{}}
+\newlabel{fig:failure}{{7}{8}{Failure cases. Left: an NIH-CXR14 case where the lung mask spills outside the chest cavity, leading to a large MoE false-positive lesion. Right: a Montgomery case where the lung mask is truncated at the lower border, producing edge-noise lesions}{figure.7}{}}
+\newlabel{sec:discussion}{{8}{8}{}{section.8}{}}
+\bibdata{main}
+\bibcite{cohen2022torchxrayvision}{{1}{2022}{{Cohen et~al.}}{{Cohen, Viviano, Bertin, Morrison, Torabian, Guarrera, Lungren, Chaudhari, Brooks, Hashir, and Bertrand}}}
+\bibcite{dosovitskiy2021vit}{{2}{2021}{{Dosovitskiy et~al.}}{{Dosovitskiy, Beyer, Kolesnikov, Weissenborn, Zhai, Unterthiner, Dehghani, Minderer, Heigold, Gelly, Uszkoreit, and Houlsby}}}
+\bibcite{ganin2016domain}{{3}{2016}{{Ganin et~al.}}{{Ganin, Ustinova, Ajakan, Germain, Larochelle, Laviolette, Marchand, and Lempitsky}}}
+\bibcite{he2016resnet}{{4}{2016}{{He et~al.}}{{He, Zhang, Ren, and Sun}}}
+\bibcite{hu2022lora}{{5}{2022}{{Hu et~al.}}{{Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and Chen}}}
+\bibcite{huang2017densenet}{{6}{2017}{{Huang et~al.}}{{Huang, Liu, Van Der~Maaten, and Weinberger}}}
+\bibcite{jaeger2014shenzhen}{{7}{2014}{{Jaeger et~al.}}{{Jaeger, Candemir, Antani, W{\'a}ng, Lu, and Thoma}}}
+\bibcite{kirillov2023sam}{{8}{2023}{{Kirillov et~al.}}{{Kirillov, Mintun, Ravi, Mao, Rolland, Gustafson, Xiao, Whitehead, Berg, Lo, Doll{\'a}r, and Girshick}}}
+\bibcite{liu2020tbx11k}{{9}{2020}{{Liu et~al.}}{{Liu, Wu, Ban, Wang, and Cheng}}}
+\bibcite{ma2024medsam}{{10}{2024}{{Ma et~al.}}{{Ma, He, Li, Han, You, and Wang}}}
+\bibcite{otsu1979threshold}{{11}{1979}{{Otsu}}{{}}}
+\bibcite{ralph2013timika}{{12}{2010}{{Ralph et~al.}}{{Ralph, Ardian, Wiguna, Maguire, Becker, Drogumuller, Wilks, Waramori, Tjitra, Sandjaja, Kenagalem, Pontororing, Anstey, and Kelly}}}
+\bibcite{ronneberger2015unet}{{13}{2015}{{Ronneberger et~al.}}{{Ronneberger, Fischer, and Brox}}}
+\bibcite{selvaraju2017gradcam}{{14}{2017}{{Selvaraju et~al.}}{{Selvaraju, Cogswell, Das, Vedantam, Parikh, and Batra}}}
+\bibcite{fedorov2017switch}{{15}{2017}{{Shazeer et~al.}}{{Shazeer, Mirhoseini, Maziarz, Davis, Le, Hinton, and Dean}}}
+\bibcite{wang2017nihcxr}{{16}{2017}{{Wang et~al.}}{{Wang, Peng, Lu, Lu, Bagheri, and Summers}}}
+\bibcite{who2024tb}{{17}{2024}{{World Health Organization}}{{}}}
+\bibstyle{icml2021}
+\gdef \@abspage@last{9}

@@ -1,0 +1,7 @@
+metric,,Lung Dice,Lung Dice,TB AUROC,TB AUROC,TB AUROC,mAP@0.5
+dataset,,Montgomery,Shenzhen,Montgomery,Shenzhen,TBX11K,TBX11K
+method,source,,,,,,
+Liu et al. 2020 (TBX11K bbox detector),paper,,,,,,0.508
+Liu et al. 2020 (TBX11K classifier),paper,,,,,0.958,
+MedSAM zero-shot (Ma 2024),paper,0.85,0.85,,,,
+Raw TXV (Cohen 2022) TB-mimic max,this notebook,,,0.5816326530612246,0.6900921658986175,0.3458874458874459,

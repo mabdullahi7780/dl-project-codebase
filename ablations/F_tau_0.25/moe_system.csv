@@ -1,0 +1,30 @@
+metric,dataset,value,n,notes
+alp_mean,montgomery,21.92695671661364,28,
+alp_std,montgomery,7.954337040624211,28,
+alp_p50,montgomery,22.33655771015672,28,
+alp_p95,montgomery,35.16892809758609,28,
+alp_mean,shenzhen,38.43099716895762,132,
+alp_std,shenzhen,10.647285962612303,132,
+alp_p50,shenzhen,36.42563092485395,132,
+alp_p95,shenzhen,57.13230588748101,132,
+alp_mean,tbx11k,30.024828698713623,200,
+alp_std,tbx11k,10.547622703245144,200,
+alp_p50,tbx11k,28.833848244537954,200,
+alp_p95,tbx11k,49.24212578571126,200,
+alp_mean,nih_cxr14,24.95238686504493,200,
+alp_std,nih_cxr14,13.171634559654073,200,
+alp_p50,nih_cxr14,23.52279702718547,200,
+alp_p95,nih_cxr14,47.94948902711887,200,
+timika_auroc,montgomery,0.30612244897959184,28,
+timika_auroc,shenzhen,0.6251152073732719,132,
+timika_auroc,tbx11k,0.4008658008658008,179,
+timika_auroc,nih_cxr14,,0,no TB/non-TB labels
+cavity_detection_rate,montgomery,1.0,14,fraction of TB+ cases with cavity flagged by Expert 2
+cavity_detection_rate,shenzhen,0.6935483870967742,62,fraction of TB+ cases with cavity flagged by Expert 2
+cavity_detection_rate,tbx11k,0.21428571428571427,14,fraction of TB+ cases with cavity flagged by Expert 2
+cavity_detection_rate,nih_cxr14,,0,no TB-positive samples
+tb_head_auroc,montgomery,0.4336734693877551,28,
+tb_head_auroc,shenzhen,0.8801843317972351,132,
+tb_head_auroc,tbx11k,0.4636363636363637,179,
+tb_head_auroc,nih_cxr14,,0,no TB/non-TB labels
+report_faithfulness,all,1.0,560,deterministic template — faithfulness guaranteed

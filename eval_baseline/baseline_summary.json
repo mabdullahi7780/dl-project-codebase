@@ -1,0 +1,45 @@
+{
+  "timestamp_utc": "2026-05-09T06:47:59Z",
+  "git_sha": "bde6ead",
+  "baseline_config_hash": "10989fc3467f",
+  "paths_config_hash": "ff1fa9b32d76",
+  "device": "cuda:Tesla T4",
+  "seed": 42,
+  "holdout_frac": 0.2,
+  "limit_per_domain": 200,
+  "components": {
+    "component1_backend": "segment_anything",
+    "component1_adapter_path": "/kaggle/input/datasets/mabdullahi454/tb-pipeline-checkpoints/component1_adapters.safetensors",
+    "component2_backend": "xrv",
+    "component4_backend": "medsam",
+    "component4_decoder_ckpt": "/kaggle/input/datasets/mabdullahi454/tb-pipeline-checkpoints/component4_mask_decoder.pt"
+  },
+  "counts": {
+    "manifest": {
+      "montgomery": 138,
+      "shenzhen": 662,
+      "tbx11k": 8976,
+      "nih_cxr14": 112120
+    },
+    "test_split": {
+      "montgomery": 28,
+      "shenzhen": 132,
+      "tbx11k": 200,
+      "nih_cxr14": 200
+    },
+    "ran_ok": 560,
+    "skipped": 0
+  },
+  "ground_truth_coverage": {
+    "nih_multilabels_indexed": 112120,
+    "tbx_bbox_images_indexed": 799,
+    "shenzhen_masks_found": true
+  },
+  "skipped_samples": [],
+  "output_files": {
+    "components_csv": "/kaggle/working/eval_baseline/baseline_components.csv",
+    "system_csv": "/kaggle/working/eval_baseline/baseline_system.csv",
+    "per_image_csv": "/kaggle/working/eval_baseline/baseline_per_image.csv",
+    "test_splits": "/kaggle/working/eval_baseline/test_splits.json"
+  }
+}
