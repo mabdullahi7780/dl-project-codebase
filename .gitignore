@@ -17,6 +17,9 @@ component1_nih_eb594ru_/
 # Local env
 .env
 
+# timika virtual environment (created by setup_timika_env.ps1)
+timika/
+
 # Artifacts
 outputs/
 logs/
@@ -61,3 +64,4 @@ checkpoints/component1/last_*.pt
 
 # Re-buildable Overleaf bundle (sources + figures are tracked separately)
 final_deliverable_report/final_deliverable_report/tb_paper_overleaf.zip
+local_work

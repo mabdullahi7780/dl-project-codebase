@@ -1,0 +1,38 @@
+# TB Portals Timika scoring — reference config for the ALP+cavity MoE/DANN pipeline.
+# Training entry point is src/training/train_tbportals_baseline.py (argparse).
+# Notebooks mirror these values into CLI flags. Day-1 = num_experts:1, use_dann:false.
+
+paths:
+  manifest: data/processed/tbportals_manifest.csv
+  crops_dir: data/processed/tbportals_crops
+  out_dir: checkpoints/tbportals/baseline
+
+data:
+  held_out_countries: [Romania, Moldova, Kazakhstan]
+  val_fraction: 0.2
+  use_lung_crop: false   # flip to true after running scripts/cache_lung_crops.py
+
+train:
+  epochs: 30
+  batch_size: 32
+  lr: 0.001
+  patience: 8
+  cavity_alpha: 1.0
+  num_workers: 2
+  amp: true
+  seeds: [0, 1, 2]
+
+model:
+  num_experts: 1         # 1 = Kantipudi A2 baseline; >1 = MoE (Day 2)
+  gate_temperature: 1.0
+  gate_warm_epochs: 5    # phase-1 warm experts under uniform gate before training gate
+  lb_weight: 0.01
+  use_dann: false        # Day 2 contribution
+  dann_beta: 0.5
+  dann_max_lambda: 1.0
+  dann_ramp: 10
+  pretrained: true
+
+eval:
+  cavity_threshold: 0.5
+  bootstrap_n: 1000
