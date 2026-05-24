@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 
 from src.components.component1_dann import compute_dann_lambda
@@ -127,7 +128,10 @@ def run_single(df, held_out: str, seed: int, args, device) -> dict:
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=use_amp):
                 out = model(images, dann_lambda=dann_lambda, uniform_gate=warming)
-                loss_alp = F.mse_loss(out.alp, alp_true)
+                # Normalise ALP loss to [0,1] scale so it is comparable to
+                # BCE (~0.3-0.7). Without this, MSE on [0,100] is ~300× larger
+                # than BCE, starving the cavity head of gradient.
+                loss_alp = F.mse_loss(out.alp / 100.0, alp_true / 100.0)
                 loss_cav = F.binary_cross_entropy_with_logits(
                     out.cavity_logit, cav_true, pos_weight=pos_weight
                 )
@@ -148,10 +152,15 @@ def run_single(df, held_out: str, seed: int, args, device) -> dict:
 
         val_preds = predict(model, val_loader, device)
         val_mae = regression_metrics(val_preds.alp_true_100, val_preds.alp_pred_100)["mae"]
+        try:
+            val_cav_auc = roc_auc_score(val_preds.cavity_true, val_preds.cavity_prob)
+        except ValueError:
+            val_cav_auc = float("nan")
         train_loss = running / max(1, len(train_loader.dataset))
         print(
             f"[train] {tag} epoch {epoch:02d} loss={train_loss:.4f} "
-            f"val_ALP_MAE={val_mae:.3f} lambda={dann_lambda:.2f}"
+            f"val_ALP_MAE={val_mae:.3f} val_cavity_AUC={val_cav_auc:.3f} "
+            f"lambda={dann_lambda:.2f}"
             f"{' (gate-warm)' if warming else ''}"
         )
 
@@ -215,7 +224,9 @@ def _parse_args(argv=None):
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--val-fraction", type=float, default=0.2)
     p.add_argument("--patience", type=int, default=8)
-    p.add_argument("--cavity-alpha", type=float, default=1.0)
+    p.add_argument("--cavity-alpha", type=float, default=0.1,
+                   help="Weight on cavity BCE loss. With ALP MSE normalised to [0,1], "
+                        "default 0.1 gives roughly equal gradient contribution from both heads.")
     p.add_argument("--cavity-threshold", type=float, default=0.5)
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--crops-dir", default=None)
