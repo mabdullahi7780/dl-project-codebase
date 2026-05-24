@@ -18,6 +18,7 @@ Example (one held-out country, 3 seeds)::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 from pathlib import Path
 
@@ -156,13 +157,13 @@ def run_single(df, held_out: str, seed: int, args, device) -> dict:
 
         torch.save(
             {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-             "epoch": epoch, "best_val_mae": best_val_mae, "config": cfg.model_dump()},
+             "epoch": epoch, "best_val_mae": best_val_mae, "config": dataclasses.asdict(cfg)},
             last_path,
         )
         if val_mae < best_val_mae - 1e-4:
             best_val_mae = val_mae
             patience_left = args.patience
-            torch.save({"model": model.state_dict(), "config": cfg.model_dump(),
+            torch.save({"model": model.state_dict(), "config": dataclasses.asdict(cfg),
                         "epoch": epoch, "val_mae": val_mae}, best_path)
         else:
             patience_left -= 1
