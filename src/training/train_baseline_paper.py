@@ -126,20 +126,24 @@ def train_alp(train_df, val_df, args, device, crops_dir):
     use_amp = args.amp and device.type == "cuda"
     scaler = GradScaler("cuda", enabled=use_amp)
 
+    accum = max(1, args.accum_steps)
+    n_batches = len(train_loader)
     best_val, best_state = float("inf"), None
     for epoch in range(args.epochs):
         model.train()
         run = 0.0
-        for b in train_loader:
+        opt.zero_grad(set_to_none=True)
+        for i, b in enumerate(train_loader):
             x = b["image"].to(device, non_blocking=True)
             y = b["alp"].to(device)
-            opt.zero_grad(set_to_none=True)
             with autocast("cuda", enabled=use_amp):
                 loss = F.mse_loss(model(x), y)
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
+            scaler.scale(loss / accum).backward()
             run += float(loss.detach()) * x.size(0)
+            if (i + 1) % accum == 0 or (i + 1) == n_batches:
+                scaler.step(opt)
+                scaler.update()
+                opt.zero_grad(set_to_none=True)
 
         model.eval()
         vsum, n = 0.0, 0
@@ -171,20 +175,24 @@ def train_cavity(train_df, val_df, args, device, crops_dir):
     use_amp = args.amp and device.type == "cuda"
     scaler = GradScaler("cuda", enabled=use_amp)
 
+    accum = max(1, args.accum_steps)
+    n_batches = len(train_loader)
     best_val, best_state = float("inf"), None
     for epoch in range(args.epochs):
         model.train()
         run = 0.0
-        for b in train_loader:
+        opt.zero_grad(set_to_none=True)
+        for i, b in enumerate(train_loader):
             x = b["image"].to(device, non_blocking=True)
             y = b["cavity"].long().to(device)
-            opt.zero_grad(set_to_none=True)
             with autocast("cuda", enabled=use_amp):
                 loss = F.cross_entropy(model(x), y)
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
+            scaler.scale(loss / accum).backward()
             run += float(loss.detach()) * x.size(0)
+            if (i + 1) % accum == 0 or (i + 1) == n_batches:
+                scaler.step(opt)
+                scaler.update()
+                opt.zero_grad(set_to_none=True)
 
         model.eval()
         vsum, n = 0.0, 0
@@ -285,7 +293,12 @@ def main(argv=None) -> None:
     p.add_argument("--held-outs", nargs="+", default=["Romania", "Moldova", "Kazakhstan"])
     p.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     p.add_argument("--epochs", type=int, default=30)
-    p.add_argument("--batch-size", type=int, default=300)
+    p.add_argument("--batch-size", type=int, default=300,
+                   help="Physical micro-batch that fits in VRAM. On a 16GB T4 use 60.")
+    p.add_argument("--accum-steps", type=int, default=1,
+                   help="Gradient accumulation steps. effective_batch = batch_size * accum_steps. "
+                        "Use --batch-size 60 --accum-steps 5 to reach the paper's effective batch "
+                        "of 300 on a 16GB GPU.")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--val-fraction", type=float, default=0.2)
     p.add_argument("--cavity-threshold", type=float, default=0.5)
