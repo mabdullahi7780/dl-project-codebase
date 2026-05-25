@@ -73,6 +73,11 @@ def subsample(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
             keep_idx += rng.choice(nocav.index.values, size=n_nocav, replace=False).tolist()
 
     out = df.loc[keep_idx].sample(frac=1.0, random_state=seed).reset_index(drop=True)
+    # Lung crops are cached as "<image_id>.png". The raw image_id is the
+    # series_instance_content_url (contains "/"), which would create nonexistent
+    # nested directories. Replace it with the unique PNG stem so the crop key is
+    # filesystem-safe and matches what TBPortalsDataset looks up.
+    out["image_id"] = out["image_path"].apply(lambda p: Path(str(p)).stem)
     return out
 
 
