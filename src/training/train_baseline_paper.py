@@ -139,7 +139,7 @@ def train_alp(train_df, val_df, args, device, crops_dir):
             scaler.scale(loss).backward()
             scaler.step(opt)
             scaler.update()
-            run += float(loss) * x.size(0)
+            run += float(loss.detach()) * x.size(0)
 
         model.eval()
         vsum, n = 0.0, 0
@@ -184,7 +184,7 @@ def train_cavity(train_df, val_df, args, device, crops_dir):
             scaler.scale(loss).backward()
             scaler.step(opt)
             scaler.update()
-            run += float(loss) * x.size(0)
+            run += float(loss.detach()) * x.size(0)
 
         model.eval()
         vsum, n = 0.0, 0
