@@ -32,6 +32,7 @@ Example::
 from __future__ import annotations
 
 import argparse
+import gc
 import random
 from pathlib import Path
 
@@ -259,6 +260,11 @@ def run_country(df, held_out, seed, args, device, crops_dir, out_dir):
     torch.save(cav_model.state_dict(), out_dir / f"cavity_{tag}.pt")
 
     preds = predict_combined(alp_model, cav_model, test_df, args, device, crops_dir)
+    # Free both DenseNets before the next (country, seed) run.
+    del alp_model, cav_model
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     res = evaluate_split(preds, cavity_threshold=args.cavity_threshold)
 
     row = {
@@ -309,6 +315,9 @@ def main(argv=None) -> None:
     p.add_argument("--amp", action="store_true", default=True)
     args = p.parse_args(argv)
 
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     device = pick_device()
     print(f"[paper-baseline] device={device}")
     df = load_manifest(args.manifest)

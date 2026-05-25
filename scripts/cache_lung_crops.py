@@ -73,6 +73,21 @@ def main(argv=None) -> None:
     device = pick_device()
     print(f"[crops] device={describe_device(device)}")
 
+    df = load_manifest(args.manifest)
+    if args.limit:
+        df = df.iloc[: args.limit]
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # If every crop already exists, skip loading MedSAM entirely. Its ViT-B
+    # encoder otherwise holds GPU memory for the rest of the kernel session,
+    # which can OOM a subsequent training run in the same notebook.
+    n_have = sum((out_dir / f"{row['image_id']}.png").is_file() for _, row in df.iterrows())
+    if n_have >= len(df):
+        print(f"[crops] all {len(df)} crops already cached in {out_dir}; skipping MedSAM.")
+        return
+    print(f"[crops] {n_have}/{len(df)} cached; generating the remaining {len(df) - n_have}.")
+
     model = Component4MedSAM(backend="medsam", checkpoint_path=args.medsam_ckpt).to(device)
     if model.active_backend != "medsam":
         raise SystemExit(
@@ -83,12 +98,6 @@ def main(argv=None) -> None:
         model.load_trained_decoder(args.lung_decoder_ckpt)
         print(f"[crops] loaded fine-tuned lung decoder: {args.lung_decoder_ckpt}")
     model.eval()
-
-    df = load_manifest(args.manifest)
-    if args.limit:
-        df = df.iloc[: args.limit]
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     n_ok = n_fallback = 0
     for i, row in df.iterrows():
@@ -120,6 +129,13 @@ def main(argv=None) -> None:
             print(f"[crops] {i + 1}/{len(df)} (lung={n_ok}, fallback={n_fallback})")
 
     print(f"[crops] DONE -> {out_dir} (lung-cropped={n_ok}, whole-image fallback={n_fallback})")
+
+    # Free MedSAM so it does not hold GPU memory for a later training cell.
+    del model
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
