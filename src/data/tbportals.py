@@ -667,7 +667,7 @@ def make_country_split(
     test_df = df[df["country"] == held_out_country].reset_index(drop=True)
     pool = df[df["country"] != held_out_country].reset_index(drop=True)
 
-    patients = pool["patient_id"].unique()
+    patients = np.asarray(pool["patient_id"].unique(), dtype=object)
     rng = np.random.default_rng(seed)
     rng.shuffle(patients)
     n_val = max(1, int(round(len(patients) * val_fraction)))
