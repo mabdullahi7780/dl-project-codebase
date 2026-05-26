@@ -32,6 +32,25 @@ KANTIPUDI_A2: dict[str, dict[str, float]] = {
                    "alp_mae": 12.16, "cavity_auc": 0.85, "cavity_f1": 0.72},
 }
 
+# Kantipudi et al. (JIIM 2024), approach A3 (direct Timika regression), Table 7.
+KANTIPUDI_A3: dict[str, dict[str, float]] = {
+    "Romania":    {"timika_mae": 19.67, "timika_mae_pct": 14.05, "timika_pearson": 0.70},
+    "Moldova":    {"timika_mae": 18.98, "timika_mae_pct": 13.56, "timika_pearson": 0.85},
+    "Kazakhstan": {"timika_mae": 22.12, "timika_mae_pct": 15.80, "timika_pearson": 0.74},
+}
+
+# Kantipudi et al. (JIIM 2024), approach A1 (lung-seg + YOLOv5 lesion-det + cavity),
+# Table 7. Cavity AUC/F1 are shared with A2 (same classifier). A1 is their WORST
+# approach; ALP comes from detection geometry, not regression.
+KANTIPUDI_A1: dict[str, dict[str, float]] = {
+    "Romania":    {"timika_mae": 23.83, "timika_mae_pct": 17.02, "timika_pearson": 0.59,
+                   "cavity_auc": 0.80, "cavity_f1": 0.81},
+    "Moldova":    {"timika_mae": 24.44, "timika_mae_pct": 17.46, "timika_pearson": 0.80,
+                   "cavity_auc": 0.88, "cavity_f1": 0.71},
+    "Kazakhstan": {"timika_mae": 22.13, "timika_mae_pct": 15.81, "timika_pearson": 0.68,
+                   "cavity_auc": 0.85, "cavity_f1": 0.72},
+}
+
 
 @dataclass(slots=True)
 class Predictions:

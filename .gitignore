@@ -65,3 +65,9 @@ checkpoints/component1/last_*.pt
 # Re-buildable Overleaf bundle (sources + figures are tracked separately)
 final_deliverable_report/final_deliverable_report/tb_paper_overleaf.zip
 local_work
+
+# Large result/artifact bundles — regenerable on Kaggle, never commit (they
+# bloat the pack and break `git push`, e.g. the 453 MB checkpoints zip).
+*.zip
+tbportals_paper_baseline/
+automated-timika-scoring-paper.pdf

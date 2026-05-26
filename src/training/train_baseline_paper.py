@@ -217,17 +217,27 @@ def train_cavity(train_df, val_df, args, device, crops_dir):
 # ── Combined prediction (separate models -> Timika) ───────────────────────────
 
 @torch.no_grad()
-def predict_combined(alp_model, cav_model, test_df, args, device, crops_dir) -> Predictions:
-    loader = _loader(_make_dataset(test_df, False, crops_dir), args.batch_size, False, args.num_workers)
+def predict_combined(alp_model, cav_model, test_df, args, device, alp_crops, cav_crops) -> Predictions:
+    """ALP and cavity may use different inputs (cropped vs whole image), so each
+    model runs over its own loader. Both are unshuffled over the same test_df, so
+    row i aligns across the two passes."""
     alp_model.eval()
     cav_model.eval()
-    at, ap, ct, cp = [], [], [], []
-    for b in loader:
+
+    alp_loader = _loader(_make_dataset(test_df, False, alp_crops), args.batch_size, False, args.num_workers)
+    at, ap = [], []
+    for b in alp_loader:
         x = b["image"].to(device)
         ap.append(alp_model(x).cpu().numpy() * 100.0)
-        cp.append(torch.softmax(cav_model(x), dim=1)[:, 1].cpu().numpy())
         at.append(b["alp"].numpy() * 100.0)
+
+    cav_loader = _loader(_make_dataset(test_df, False, cav_crops), args.batch_size, False, args.num_workers)
+    ct, cp = [], []
+    for b in cav_loader:
+        x = b["image"].to(device)
+        cp.append(torch.softmax(cav_model(x), dim=1)[:, 1].cpu().numpy())
         ct.append(b["cavity"].numpy())
+
     return Predictions(
         alp_true_100=np.concatenate(at),
         alp_pred_100=np.concatenate(ap),
@@ -238,7 +248,7 @@ def predict_combined(alp_model, cav_model, test_df, args, device, crops_dir) -> 
 
 # ── One (held-out country, seed) run ──────────────────────────────────────────
 
-def run_country(df, held_out, seed, args, device, crops_dir, out_dir):
+def run_country(df, held_out, seed, args, device, alp_crops, cav_crops, out_dir):
     seed_everything(seed)
     print(f"\n===== {held_out}  seed={seed} =====")
 
@@ -246,20 +256,20 @@ def run_country(df, held_out, seed, args, device, crops_dir, out_dir):
         df, held_out, val_fraction=args.val_fraction, seed=seed
     )
     print(f"[ALP] train={len(alp_train)} val={len(alp_val)} test={len(test_df)}")
-    alp_model, alp_best = train_alp(alp_train, alp_val, args, device, crops_dir)
+    alp_model, alp_best = train_alp(alp_train, alp_val, args, device, alp_crops)
 
     cav_train, cav_val, _ = make_balanced_cavity_split(
         df, held_out, val_fraction=args.val_fraction, seed=seed
     )
     n_cav = int(cav_train["cavity"].sum()) + int(cav_val["cavity"].sum())
     print(f"[CAV] train={len(cav_train)} val={len(cav_val)} (balanced, cavity+={n_cav})")
-    cav_model, cav_best = train_cavity(cav_train, cav_val, args, device, crops_dir)
+    cav_model, cav_best = train_cavity(cav_train, cav_val, args, device, cav_crops)
 
     tag = f"{held_out}_seed{seed}"
     torch.save(alp_model.state_dict(), out_dir / f"alp_{tag}.pt")
     torch.save(cav_model.state_dict(), out_dir / f"cavity_{tag}.pt")
 
-    preds = predict_combined(alp_model, cav_model, test_df, args, device, crops_dir)
+    preds = predict_combined(alp_model, cav_model, test_df, args, device, alp_crops, cav_crops)
     # Free both DenseNets before the next (country, seed) run.
     del alp_model, cav_model
     gc.collect()
@@ -311,7 +321,14 @@ def main(argv=None) -> None:
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--no-pretrained", action="store_true")
     p.add_argument("--no-lung-crop", action="store_true",
-                   help="Debug: ignore crops-dir and train on whole images (NOT paper-faithful).")
+                   help="Master kill switch: ignore crops-dir and train BOTH heads on whole images.")
+    p.add_argument("--alp-no-lung-crop", action="store_true",
+                   help="Train the ALP regressor on whole images (override crops for ALP only).")
+    p.add_argument("--cavity-no-lung-crop", action="store_true",
+                   help="Train the cavity classifier on whole images. Whole-image input keeps the "
+                        "lung apex (where cavities concentrate) and empirically beats lung-cropped "
+                        "input for cavity AUC; the paper's own lesion-detection results show the "
+                        "same crop-hurts-detection effect.")
     p.add_argument("--amp", action="store_true", default=True)
     args = p.parse_args(argv)
 
@@ -322,10 +339,14 @@ def main(argv=None) -> None:
     print(f"[paper-baseline] device={device}")
     df = load_manifest(args.manifest)
 
-    crops_dir = None if args.no_lung_crop else args.crops_dir
-    if crops_dir is None:
-        print("[paper-baseline][WARN] training on WHOLE images (no lung crop). "
-              "This is NOT paper-faithful — pass --crops-dir for replication.")
+    base_crops = None if args.no_lung_crop else args.crops_dir
+    alp_crops = None if args.alp_no_lung_crop else base_crops
+    cav_crops = None if args.cavity_no_lung_crop else base_crops
+    print(f"[paper-baseline] ALP input    = {('lung-crop ' + str(alp_crops)) if alp_crops else 'WHOLE image'}")
+    print(f"[paper-baseline] cavity input = {('lung-crop ' + str(cav_crops)) if cav_crops else 'WHOLE image'}")
+    if alp_crops is None or cav_crops is None:
+        print("[paper-baseline][NOTE] at least one head trains on whole images "
+              "(the paper crops both; whole-image cavity is an intentional ablation).")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -334,7 +355,7 @@ def main(argv=None) -> None:
     results_last: dict[str, dict] = {}
     for held_out in args.held_outs:
         for seed in args.seeds:
-            row, res = run_country(df, held_out, seed, args, device, crops_dir, out_dir)
+            row, res = run_country(df, held_out, seed, args, device, alp_crops, cav_crops, out_dir)
             rows.append(row)
             results_last[held_out] = res  # last seed feeds the comparison table
             pd.DataFrame(rows).to_csv(out_dir / "results.csv", index=False)

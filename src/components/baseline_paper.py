@@ -61,3 +61,22 @@ class CavityClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.backbone(x))  # [B, 2] logits
+
+
+class TimikaRegressor(nn.Module):
+    """DenseNet121 + 1-neuron sigmoid head (Kantipudi A3: direct Timika).
+
+    The paper passes the output through a sigmoid and multiplies by 140 to span
+    the Timika range [0, 140]. To mirror ``ALPRegressor`` and keep training
+    numerically stable, ``forward`` returns the sigmoid fraction in [0, 1]; the
+    caller multiplies by 140 at prediction time and trains MSE against
+    ``timika_true / 140``.
+    """
+
+    def __init__(self, pretrained: bool = True) -> None:
+        super().__init__()
+        self.backbone = _DenseNet121Features(pretrained)
+        self.head = nn.Linear(FEATURE_DIM, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.head(self.backbone(x))).squeeze(1)  # [B] in [0,1]; x140 = Timika
