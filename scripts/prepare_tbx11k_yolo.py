@@ -109,6 +109,9 @@ def main(argv=None) -> None:
         )
 
     images = _index_images(root)
+    by_stem: dict[str, Path] = {}
+    for _name, _p in images.items():
+        by_stem.setdefault(Path(_name).stem, _p)  # TBX11K XML <filename> has no extension
     print(f"[tbx11k] indexed {len(images)} image files")
 
     out = Path(args.out)
@@ -118,11 +121,16 @@ def main(argv=None) -> None:
     rng = random.Random(args.seed)
     records = []  # (img_path, [yolo_lines])
     n_boxes = n_skipped = 0
+    sample_fnames: list[str] = []
     for xml in xmls:
         fname, w, h, boxes = _parse_voc(xml)
         if not boxes:
             continue
-        img_path = images.get(fname.lower()) or images.get(Path(fname).name.lower())
+        if len(sample_fnames) < 5:
+            sample_fnames.append(fname)
+        img_path = (images.get(fname.lower())
+                    or images.get(Path(fname).name.lower())
+                    or by_stem.get(Path(fname).stem.lower()))  # XML filename lacks extension
         if img_path is None:
             n_skipped += 1
             continue
@@ -144,7 +152,12 @@ def main(argv=None) -> None:
         n_boxes += len(lines)
 
     if not records:
-        raise SystemExit("[tbx11k] Parsed XML but matched 0 images. Check filename<->image mapping.")
+        raise SystemExit(
+            "[tbx11k] Parsed XML but matched 0 images.\n"
+            f"  sample XML <filename> values: {sample_fnames}\n"
+            f"  sample image stems: {list(by_stem)[:5]}\n"
+            "  -> XML filenames do not align with image stems."
+        )
 
     if args.train_list and args.val_list:
         train_names = _read_list(Path(args.train_list))
