@@ -21,6 +21,24 @@ import torch.nn.functional as F
 from PIL import Image
 
 
+def _pool_tokens_to_grid(tokens: torch.Tensor, grid: int) -> torch.Tensor:
+    """[N, P, D] ViT patch tokens -> [N, grid*grid, D] via 2-D adaptive pooling.
+
+    If P is a perfect square the tokens are reshaped to their native HpxWp grid
+    before pooling (preserves 2-D layout); otherwise we fall back to 1-D adaptive
+    pooling over the sequence so the function never fails on non-square inputs.
+    """
+    n, p, d = tokens.shape
+    side = int(round(p ** 0.5))
+    if side * side == p:
+        g = tokens.reshape(n, side, side, d).permute(0, 3, 1, 2)   # [N, D, side, side]
+        g = F.adaptive_avg_pool2d(g, (grid, grid))                 # [N, D, grid, grid]
+        return g.reshape(n, d, grid * grid).permute(0, 2, 1)       # [N, grid*grid, D]
+    seq = tokens.permute(0, 2, 1)                                   # [N, D, P]
+    seq = F.adaptive_avg_pool1d(seq, grid * grid)                   # [N, D, grid*grid]
+    return seq.permute(0, 2, 1)
+
+
 class RadDinoBackbone:
     name = "rad-dino"
 
@@ -40,6 +58,15 @@ class RadDinoBackbone:
         if emb is None:  # CLS token of the last hidden state
             emb = out.last_hidden_state[:, 0]
         return emb.float().cpu().numpy()
+
+    @torch.inference_mode()
+    def embed_grid(self, images: list[Image.Image], grid: int = 7) -> np.ndarray:
+        """Pooled patch-token grid [N, grid*grid, D] (A1 spatial features)."""
+        inputs = self.processor(images=[im.convert("RGB") for im in images], return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        out = self.model(**inputs)
+        tokens = out.last_hidden_state[:, 1:]  # drop CLS -> [N, P, D]
+        return _pool_tokens_to_grid(tokens, grid).float().cpu().numpy()
 
 
 class TorchXRVBackbone:
@@ -64,6 +91,21 @@ class TorchXRVBackbone:
         feat = self.model.features(x)           # [N, 1024, 7, 7]
         feat = F.relu(feat, inplace=True)
         return F.adaptive_avg_pool2d(feat, (1, 1)).flatten(1).float().cpu().numpy()
+
+    @torch.inference_mode()
+    def embed_grid(self, images: list[Image.Image], grid: int = 7) -> np.ndarray:
+        """Pooled conv-feature grid [N, grid*grid, 1024] (A1 spatial features)."""
+        batch = []
+        for im in images:
+            arr = np.asarray(im.convert("L"), dtype=np.float32)
+            arr = self.xrv.datasets.normalize(arr, 255)
+            batch.append(torch.from_numpy(arr)[None])
+        x = torch.stack(batch).to(self.device)
+        x = F.interpolate(x, size=(224, 224), mode="bilinear", align_corners=False)
+        feat = F.relu(self.model.features(x), inplace=True)         # [N, 1024, 7, 7]
+        feat = F.adaptive_avg_pool2d(feat, (grid, grid))            # [N, 1024, g, g]
+        N, C = feat.shape[0], feat.shape[1]
+        return feat.reshape(N, C, grid * grid).permute(0, 2, 1).float().cpu().numpy()
 
 
 class DenseNetBackbone:

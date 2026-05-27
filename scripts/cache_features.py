@@ -26,11 +26,16 @@ from src.data.tbportals_dataset import _load_image
 
 
 def load_features(path: str) -> tuple[dict[str, np.ndarray], int]:
-    """Return ({image_id: vector}, dim) from a cache produced by this script."""
+    """Return ({image_id: vector}, dim) from a cache produced by this script.
+
+    Handles both CLS caches (features [N, D] -> each value [D]) and patch-grid
+    caches (features [N, P, D] -> each value [P, D]). ``dim`` is the feature
+    width D in both cases.
+    """
     z = np.load(path, allow_pickle=True)
     ids = [str(i) for i in z["image_id"]]
     feats = z["features"].astype(np.float32)
-    return {i: feats[k] for k, i in enumerate(ids)}, int(feats.shape[1])
+    return {i: feats[k] for k, i in enumerate(ids)}, int(feats.shape[-1])
 
 
 def main(argv=None) -> None:
@@ -40,12 +45,22 @@ def main(argv=None) -> None:
     ap.add_argument("--backbone", default="rad-dino", choices=["rad-dino", "txrv", "densenet"])
     ap.add_argument("--model-id", default=None, help="Override HF model id (rad-dino only).")
     ap.add_argument("--batch-size", type=int, default=32)
+    ap.add_argument("--patch-grid", type=int, default=0,
+                    help="If >0, cache a GxG pooled patch-token grid per image "
+                         "(features [N, G*G, D]) for the A1 spatial head, instead "
+                         "of the global CLS vector.")
     args = ap.parse_args(argv)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[cache] backbone={args.backbone} device={device}")
+    grid = int(args.patch_grid)
+    print(f"[cache] backbone={args.backbone} device={device} patch_grid={grid or 'off (CLS)'}")
     backbone = build_backbone(args.backbone, device, args.model_id)
+    if grid > 0 and not hasattr(backbone, "embed_grid"):
+        raise SystemExit(f"backbone {args.backbone!r} has no embed_grid (use rad-dino or txrv for A1)")
     print(f"[cache] feature dim = {backbone.dim}")
+
+    def _embed(imgs):
+        return backbone.embed_grid(imgs, grid) if grid > 0 else backbone.embed(imgs)
 
     df = pd.read_csv(args.manifest, dtype={"image_id": str})
     ids: list[str] = []
@@ -55,7 +70,7 @@ def main(argv=None) -> None:
     def flush():
         if not batch_imgs:
             return
-        feats.append(backbone.embed(batch_imgs))
+        feats.append(_embed(batch_imgs))
         ids.extend(batch_ids)
         batch_imgs.clear()
         batch_ids.clear()
@@ -77,8 +92,9 @@ def main(argv=None) -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, image_id=np.array(ids, dtype=object),
-                        features=features, backbone=args.backbone)
-    print(f"[cache] wrote {features.shape[0]} x {features.shape[1]} features -> {out}")
+                        features=features, backbone=args.backbone,
+                        patch_grid=np.int64(grid))
+    print(f"[cache] wrote features {features.shape} -> {out}")
 
 
 if __name__ == "__main__":

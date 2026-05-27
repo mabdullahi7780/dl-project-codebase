@@ -213,6 +213,26 @@ def evaluate_split(preds: Predictions, *, cavity_threshold: float = 0.5) -> dict
     return {"alp": alp, "timika": timika, "cavity": cavity}
 
 
+def evaluate_timika_direct(timika_true: np.ndarray, timika_pred: np.ndarray) -> dict[str, dict]:
+    """Timika metrics + CIs when Timika is predicted directly (a3 / fusion modes)."""
+    t = regression_metrics(timika_true, timika_pred)
+    mae_fn = lambda a, b: float(np.mean(np.abs(b - a)))
+    t["mae_ci95"] = bootstrap_ci(timika_true, timika_pred, mae_fn)
+    t["pearson_ci95"] = bootstrap_ci(timika_true, timika_pred, lambda a, b: _safe_pearson(a, b))
+    return {"timika": t}
+
+
+# Per-mode reference lookup so the orchestrator can compare any mode to the right
+# locked baseline (honest target) and Kantipudi numbers (aspirational). Fusion has
+# no locked baseline of its own — compare it to a3 (our best locked approach) and
+# to Kantipudi A2 (the best reported approach).
+def references_for_mode(mode: str) -> tuple[dict, dict]:
+    paper = {"a1": KANTIPUDI_A1, "a2": KANTIPUDI_A2, "a3": KANTIPUDI_A3,
+             "fusion": KANTIPUDI_A2}[mode]
+    locked_key = "a3" if mode == "fusion" else mode
+    return LOCKED_BASELINE[locked_key], paper
+
+
 def print_comparison_table(results_by_country: dict[str, dict]) -> None:
     """Print ours-vs-Kantipudi per held-out country."""
     print("\n" + "=" * 78)

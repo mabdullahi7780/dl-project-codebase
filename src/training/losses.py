@@ -60,3 +60,32 @@ def make_reg_loss(kind: str):
         mod = BMCLoss()
         return mod, mod
     raise ValueError(f"unknown reg loss {kind!r} (use mse | bmc)")
+
+
+# ── Rung 4: cavity-head upgrade ───────────────────────────────────────────────
+# Romania's Timika MAE is dominated by cavity errors (cavAUC ~0.68; each
+# misclassification costs 40 Timika points). Class-balanced focal loss
+# (Lin et al. 2017 focal + Cui et al. 2019 effective-number reweighting)
+# down-weights easy negatives and re-balances the (often skewed) cavity prior.
+
+
+def class_balanced_weights(n_per_class: list[int] | np.ndarray, *, beta: float = 0.999) -> torch.Tensor:
+    """Effective-number class weights (Cui et al. 2019), normalised to mean 1."""
+    n = np.asarray(n_per_class, dtype=np.float64)
+    eff = 1.0 - np.power(beta, np.maximum(n, 1.0))
+    w = (1.0 - beta) / np.maximum(eff, 1e-12)
+    w = w / w.mean()
+    return torch.tensor(w, dtype=torch.float32)
+
+
+def focal_ce(logits: torch.Tensor, target: torch.Tensor, *, gamma: float = 2.0,
+             weight: torch.Tensor | None = None) -> torch.Tensor:
+    """Multi-class focal cross-entropy. ``logits`` [B, C], ``target`` [B] long."""
+    logp = F.log_softmax(logits, dim=1)
+    p = logp.exp()
+    logp_t = logp.gather(1, target[:, None]).squeeze(1)
+    p_t = p.gather(1, target[:, None]).squeeze(1)
+    loss = -((1.0 - p_t) ** gamma) * logp_t
+    if weight is not None:
+        loss = loss * weight.to(logits.device)[target]
+    return loss.mean()
