@@ -52,6 +52,50 @@ KANTIPUDI_A1: dict[str, dict[str, float]] = {
 }
 
 
+# OUR locked single-network baselines (3-seed means, baseline_runs/BASELINE_COMPARISON.md).
+# These are the HONEST target the agentic model must beat (Kantipudi above is aspirational).
+LOCKED_BASELINE: dict[str, dict[str, dict[str, float]]] = {
+    "a2": {"Romania": {"timika_mae": 20.11, "timika_pearson": 0.684},
+           "Moldova": {"timika_mae": 30.68, "timika_pearson": 0.697},
+           "Kazakhstan": {"timika_mae": 21.35, "timika_pearson": 0.648}},
+    "a3": {"Romania": {"timika_mae": 20.26, "timika_pearson": 0.699},
+           "Moldova": {"timika_mae": 26.16, "timika_pearson": 0.759},
+           "Kazakhstan": {"timika_mae": 21.90, "timika_pearson": 0.692}},
+    "a1": {"Romania": {"timika_mae": 26.84, "timika_pearson": 0.570},
+           "Moldova": {"timika_mae": 32.76, "timika_pearson": 0.643},
+           "Kazakhstan": {"timika_mae": 21.87, "timika_pearson": 0.651}},
+}
+
+
+def paired_bootstrap_delta(
+    y_true: np.ndarray,
+    pred_a: np.ndarray,
+    pred_b: np.ndarray,
+    metric_fn,
+    *,
+    n_boot: int = 2000,
+    seed: int = 1337,
+) -> tuple[float, float, float]:
+    """95% CI of metric(a) - metric(b) via PAIRED resampling on the same images.
+
+    Use when both models' per-image predictions exist (e.g. agentic vs a re-run
+    baseline). Returns (delta_point, ci_lo, ci_hi). If the CI excludes 0 the
+    difference is significant at ~p<0.05.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    point = metric_fn(y_true, pred_a) - metric_fn(y_true, pred_b)
+    deltas = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        d = metric_fn(y_true[idx], pred_a[idx]) - metric_fn(y_true[idx], pred_b[idx])
+        if not np.isnan(d):
+            deltas.append(d)
+    if not deltas:
+        return (point, float("nan"), float("nan"))
+    return (point, float(np.percentile(deltas, 2.5)), float(np.percentile(deltas, 97.5)))
+
+
 @dataclass(slots=True)
 class Predictions:
     alp_true_100: np.ndarray
