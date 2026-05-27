@@ -191,12 +191,23 @@ def run_country(df, held_out, seed, args, device, crops_dir, cav_crops, det_alp_
                     mask = cidx >= 0
                     if mask.any():
                         loss = loss + F.cross_entropy(out.country_logits[mask], cidx[mask])
-            scaler.scale(loss / accum).backward()
+            # In degenerate configs the loss can have no trainable parameters,
+            # e.g. mode=a1 (a single fixed detection view, no learnable experts)
+            # with --no-dann in phase 1, or with --no-dann --no-critic in either
+            # phase. Skip the step instead of crashing on backward().
+            trainable = loss.requires_grad
+            if trainable:
+                scaler.scale(loss / accum).backward()
             run += float(loss.detach()) * img.size(0)
             if (i + 1) % accum == 0 or (i + 1) == n_batches:
-                scaler.step(opt)
-                scaler.update()
+                if trainable:
+                    scaler.step(opt)
+                    scaler.update()
                 opt.zero_grad(set_to_none=True)
+        if not trainable and epoch in (0, args.pretrain_epochs):
+            ph0 = "phase 2" if phase2 else "phase 1"
+            print(f"  [note] {ph0}: loss has no trainable parameters "
+                  f"(expected for mode=a1 with --no-dann/--no-critic); optimisation skipped.")
 
         # validation: final-Timika MSE (works in both phases)
         model.eval()
