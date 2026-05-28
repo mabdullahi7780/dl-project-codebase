@@ -81,6 +81,30 @@ class RungCfg:
     critic: bool = False         # Rung 5
     ensemble: int = 1            # M members (Rung 6)
     conformal: bool = False      # Rung 6
+    calibrate_pred: str = "none" # none | linear | isotonic (Rung 7 — fixes slope <1)
+
+
+def _fit_calibrate(val_pred: np.ndarray, val_true: np.ndarray, kind: str):
+    """Fit a post-hoc calibrator on (val_pred, val_true) -> callable applied to test.
+
+    Both are in the head's working scale (e.g. ALP/100 or Timika/140 in [0,1]).
+    The fitted transform corrects the slope < 1 compression observed in MSE-trained
+    sigmoid regressors (`pred ≈ 0.55·true + b`). ``'linear'`` fits y = a·x + b on val;
+    ``'isotonic'`` fits a monotone non-parametric mapping (more flexible, can overfit
+    small val sets — use linear by default).
+    """
+    val_pred = np.asarray(val_pred, dtype=np.float64).reshape(-1)
+    val_true = np.asarray(val_true, dtype=np.float64).reshape(-1)
+    if kind == "none" or len(val_pred) < 4 or np.std(val_pred) < 1e-6:
+        return lambda x: np.asarray(x, dtype=np.float32)
+    if kind == "linear":
+        a, b = np.polyfit(val_pred, val_true, 1)
+        return lambda x: np.clip(a * np.asarray(x) + b, 0.0, 1.0).astype(np.float32)
+    if kind == "isotonic":
+        from sklearn.isotonic import IsotonicRegression
+        iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(val_pred, val_true)
+        return lambda x: iso.transform(np.asarray(x)).astype(np.float32)
+    raise ValueError(f"unknown calibrate_pred kind {kind!r}")
 
 
 def rung_ladder(mode: str, requested: list[int], *, ensemble_M: int = 5,
@@ -104,12 +128,24 @@ def rung_ladder(mode: str, requested: list[int], *, ensemble_M: int = 5,
         out.append(RungCfg("rung5_moe", alp_head="moe", critic=True))
     if 6 in requested:
         out.append(RungCfg("rung6_conformal", ensemble=ensemble_M, conformal=True))
+    if 7 in requested:
+        # Slope-calibration in isolation (base = rung1 with retrieval off, ensemble off).
+        out.append(RungCfg("rung7_calibrate_lin", calibrate_pred="linear"))
+        out.append(RungCfg("rung7_calibrate_iso", calibrate_pred="isotonic"))
 
     # Rung 4 was a negative result → "agentic_best" intentionally drops the focal-cavity
     # change and uses CE cavity. It stacks the two positive contributors (R3 + R6).
     out.append(RungCfg("agentic_best", retrieval=True,
                        ensemble=ensemble_M if 6 in requested else 1,
                        conformal=(6 in requested)))
+    # agentic_v2 = agentic_best + slope calibration (the slope-fix headline).
+    if 7 in requested:
+        out.append(RungCfg("agentic_v2_lin", retrieval=True,
+                           ensemble=ensemble_M if 6 in requested else 1,
+                           conformal=(6 in requested), calibrate_pred="linear"))
+        out.append(RungCfg("agentic_v2_iso", retrieval=True,
+                           ensemble=ensemble_M if 6 in requested else 1,
+                           conformal=(6 in requested), calibrate_pred="isotonic"))
     # TTA helps Moldova specifically — keep a separate "best_tta" variant so the paper
     # can quote ours-on-Moldova with TTA and ours-on-Rom/Kaz without.
     if not a1_grid:
@@ -348,7 +384,13 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         ftr = _pool(Xtr).cpu().numpy()
         cal = RetrievalCalibrator(k=args.knn_k).fit(ftr, ytr.cpu().numpy())
         alpha, _ = cal.select_alpha(_pool(Xval).cpu().numpy(), reg_va, yval.cpu().numpy())
+        reg_va = cal.calibrate(_pool(Xval).cpu().numpy(), reg_va, alpha)
         reg_te = cal.calibrate(_pool(Xte).cpu().numpy(), reg_te, alpha)
+
+    # ── Rung 7: post-hoc slope calibration on the head's [0,1] target space ──
+    if cfg.calibrate_pred != "none":
+        calib = _fit_calibrate(reg_va, yval.cpu().numpy(), cfg.calibrate_pred)
+        reg_te = calib(reg_te); reg_va = calib(reg_va)
 
     # ── cavity head (a2/fusion/a1) ──
     cav_prob_te = None
@@ -402,6 +444,10 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
                                         device=device, seed=seed + 7, M=M)
         alp_te, _ = ensemble_mean([_reg_predict(h, Xte) for h in alp_heads])
         alp_va, _ = ensemble_mean([_reg_predict(h, Xval) for h in alp_heads])
+        # Rung 7 also applies to fusion's a2 ALP head (separate target scale: alp/100).
+        if cfg.calibrate_pred != "none":
+            alp_calib = _fit_calibrate(alp_va, ya_val.cpu().numpy(), cfg.calibrate_pred)
+            alp_te = alp_calib(alp_te); alp_va = alp_calib(alp_va)
         cav_va = cav_prob_aval
         t_a2_te = alp_te * 100.0 + CAV_BONUS * (cav_prob_te > cav_thr)
         t_a3_te = reg_te * 140.0

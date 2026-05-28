@@ -20,10 +20,10 @@ NB_DIR = Path(__file__).parent / "notebooks"
 # (mode -> rungs)  rung4 dropped for a2/fusion (negative result); kept on a1 for ablation
 # completeness. a3 has no cavity head so r4 is auto-skipped.
 MODES = {
-    "a2":     {"rungs": "1 2 3 5 6", "primary_grid": False},
-    "a3":     {"rungs": "1 2 3 5 6", "primary_grid": False},
-    "fusion": {"rungs": "1 2 3 5 6", "primary_grid": False},
-    "a1":     {"rungs": "1 3 6",     "primary_grid": True},
+    "a2":     {"rungs": "1 2 3 5 6 7", "primary_grid": False},
+    "a3":     {"rungs": "1 2 3 5 6 7", "primary_grid": False},
+    "fusion": {"rungs": "1 2 3 5 6 7", "primary_grid": False},
+    "a1":     {"rungs": "1 3 6 7",     "primary_grid": True},
 }
 SEEDS = "0 1 2 3 4"     # 5 seeds for the headline
 ENSEMBLE_M = 10
