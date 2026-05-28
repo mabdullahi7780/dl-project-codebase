@@ -93,6 +93,42 @@ class CriticHead(nn.Module):
         return torch.sigmoid(self.net(x)).squeeze(1)  # [B] in [0,1]
 
 
+class SpatialCavityHead(nn.Module):
+    """Per-patch cavity scoring + attention pooling over a frozen patch grid.
+
+    Cavities are *localized* lesions occupying a small fraction of the lung field.
+    A global CLS embedding averages over the whole image and washes the signal out
+    (RAD-DINO Romania cavity AUC = 0.675 with the global head). This head scores
+    each patch independently then pools the patch-level evidence via a learned
+    attention weight, so a single high-score patch can dominate the prediction —
+    matching the clinical fact that finding *one* cavity suffices to label the
+    image cavity-positive.
+
+    Input  : [B, P, D] patch tokens (e.g. RAD-DINO 7x7 grid pooled).
+    Output : [B, 2] cavity-vs-no-cavity logits (drop-in for ClassifierHead).
+    """
+
+    def __init__(self, in_dim: int, hidden: int = 256, dropout: float = 0.3) -> None:
+        super().__init__()
+        self.score = nn.Sequential(
+            nn.Linear(in_dim, hidden), nn.ReLU(inplace=True), nn.Dropout(dropout),
+            nn.Linear(hidden, 2),                                # per-patch logits
+        )
+        self.attn = nn.Sequential(
+            nn.Linear(in_dim, hidden // 2), nn.ReLU(inplace=True),
+            nn.Linear(hidden // 2, 1),                            # per-patch attention logit
+        )
+
+    def forward(self, x: torch.Tensor, *, return_attn: bool = False):
+        # x: [B, P, D]
+        per_patch = self.score(x)                                 # [B, P, 2]
+        attn = torch.softmax(self.attn(x).squeeze(-1), dim=1)     # [B, P]
+        pooled = (per_patch * attn.unsqueeze(-1)).sum(dim=1)      # [B, 2]
+        if return_attn:
+            return pooled, attn
+        return pooled
+
+
 class SpatialALPHead(nn.Module):
     """A1-adapted: per-zone involvement over a patch grid -> ALP in [0,1].
 

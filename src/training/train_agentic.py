@@ -44,6 +44,7 @@ from src.components.feature_heads import (
     MoERegressionHead,
     RegressionHead,
     SpatialALPHead,
+    SpatialCavityHead,
 )
 from src.components.retrieval import RetrievalCalibrator
 from src.data.tbportals import load_manifest, make_country_split
@@ -75,32 +76,58 @@ class RungCfg:
     retrieval: bool = False      # Rung 3
     cavity_loss: str = "ce"      # ce | focal (Rung 4)
     cavity_cal: bool = False     # per-country threshold calibration (Rung 4)
+    cavity_head: str = "global"  # global | spatial (spatial = SpatialCavityHead on patch grid)
     alp_head: str = "mlp"        # mlp | moe (Rung 5)
     critic: bool = False         # Rung 5
     ensemble: int = 1            # M members (Rung 6)
     conformal: bool = False      # Rung 6
 
 
-def rung_ladder(mode: str, requested: list[int]) -> list[RungCfg]:
+def rung_ladder(mode: str, requested: list[int], *, ensemble_M: int = 5,
+                grid_available: bool = False) -> list[RungCfg]:
+    """Build the per-mode rung ladder. Set ``grid_available=True`` when a patch-grid
+    feature cache is loaded so spatial cavity / spatial ALP heads become usable.
+    """
     has_cavity = mode in ("a2", "fusion", "a1")
-    grid = mode == "a1"
+    a1_grid = mode == "a1"     # a1 uses grid features for ALP head too
     out: list[RungCfg] = []
     if 1 in requested:
         out.append(RungCfg("rung1_mse", loss="mse"))
         out.append(RungCfg("rung1_bmc", loss="bmc"))
-    if 2 in requested and not grid:           # TTA skipped for a1 grid features
+    if 2 in requested and not a1_grid:
         out.append(RungCfg("rung2_tta", standardize="transductive"))
     if 3 in requested:
         out.append(RungCfg("rung3_retrieval", retrieval=True))
     if 4 in requested and has_cavity:
         out.append(RungCfg("rung4_cavity", cavity_loss="focal", cavity_cal=True))
-    if 5 in requested and not grid:           # MoE replaces the global head, not the spatial one
+    if 5 in requested and not a1_grid:
         out.append(RungCfg("rung5_moe", alp_head="moe", critic=True))
     if 6 in requested:
-        out.append(RungCfg("rung6_conformal", ensemble=5, conformal=True))
-    # stacked: combine the safe lifters
-    stack = dict(name="stacked", retrieval=(3 in requested),
-                 ensemble=5 if 6 in requested else 1, conformal=(6 in requested))
+        out.append(RungCfg("rung6_conformal", ensemble=ensemble_M, conformal=True))
+
+    # Rung 4 was a negative result → "agentic_best" intentionally drops the focal-cavity
+    # change and uses CE cavity. It stacks the two positive contributors (R3 + R6).
+    out.append(RungCfg("agentic_best", retrieval=True,
+                       ensemble=ensemble_M if 6 in requested else 1,
+                       conformal=(6 in requested)))
+    # TTA helps Moldova specifically — keep a separate "best_tta" variant so the paper
+    # can quote ours-on-Moldova with TTA and ours-on-Rom/Kaz without.
+    if not a1_grid:
+        out.append(RungCfg("agentic_best_tta", standardize="transductive", retrieval=True,
+                           ensemble=ensemble_M if 6 in requested else 1,
+                           conformal=(6 in requested)))
+    # Romania-cavity attack: spatial cavity head over the patch grid (replaces the global
+    # head). Only meaningful when a patch grid is available + the mode uses cavity.
+    if grid_available and has_cavity:
+        out.append(RungCfg("rung4b_spatial_cavity", cavity_head="spatial"))
+        out.append(RungCfg("agentic_best_spatcav", cavity_head="spatial", retrieval=True,
+                           ensemble=ensemble_M if 6 in requested else 1,
+                           conformal=(6 in requested)))
+
+    # Legacy stacked (kept for backwards-compat): R3 + R4 + R6. We know R4 hurts, but
+    # leaving it surfaces the comparison cleanly.
+    stack = dict(name="stacked_legacy", retrieval=(3 in requested),
+                 ensemble=ensemble_M if 6 in requested else 1, conformal=(6 in requested))
     if 4 in requested and has_cavity:
         stack.update(cavity_loss="focal", cavity_cal=True)
     out.append(RungCfg(**stack))
@@ -198,9 +225,16 @@ def _reg_predict(head, X) -> np.ndarray:
         return head(X).cpu().numpy()
 
 
-def _train_cav(Xtr, ytr, Xval, yval, in_dim, *, loss, calibrate, args, device, seed):
+def _train_cav(Xtr, ytr, Xval, yval, in_dim, *, loss, calibrate, args, device, seed,
+               head_kind: str = "global"):
+    """Train cavity head. ``head_kind='global'`` -> ClassifierHead on pooled features;
+    ``'spatial'`` -> SpatialCavityHead on a [B, P, D] patch grid (caller must pass
+    un-pooled features for both train and val)."""
     seed_everything(seed + 100)
-    head = ClassifierHead(in_dim, args.hidden).to(device)
+    if head_kind == "spatial":
+        head = SpatialCavityHead(in_dim, args.hidden).to(device)
+    else:
+        head = ClassifierHead(in_dim, args.hidden).to(device)
     opt = torch.optim.NAdam(head.parameters(), lr=args.lr, weight_decay=1e-4)
     ytr_l = ytr.long()
     n_pos = int(ytr_l.sum()); n_neg = int(len(ytr_l) - n_pos)
@@ -267,9 +301,17 @@ def _train_reg_ensemble(Xtr, ytr, Xval, yval, in_dim, *, kind, loss, select_metr
     ]
 
 
-def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_dir):
-    """Train + evaluate one rung config for one held-out country / seed. Returns a row."""
+def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_dir,
+             feats_grid: dict | None = None, dim_grid: int | None = None):
+    """Train + evaluate one rung config for one held-out country / seed. Returns a row.
+
+    ``feats`` is the primary feature cache used by the ALP/Timika head ([N,D] CLS for
+    a2/a3/fusion; [N,P,D] grid for a1 spatial ALP). ``feats_grid`` (optional) is a
+    separate patch-grid cache used by the spatial cavity head when cfg.cavity_head=='spatial'.
+    """
     spatial = mode == "a1"
+    use_spatial_cav = cfg.cavity_head == "spatial" and (
+        feats_grid is not None or (spatial and feats is not None))
 
     # ALP/Timika regression split (patient-disjoint, country-segregated)
     a_tr, a_val, test_df = make_country_split(
@@ -315,16 +357,30 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
     if mode in ("a2", "fusion", "a1"):
         c_tr, c_val, _ = make_balanced_cavity_split(_MANIFEST, held_out,
                                                      val_fraction=args.val_fraction, seed=seed)
-        Xct, ct = _gather(c_tr, feats, device)
-        Xcv, cv = _gather(c_val, feats, device)
-        Xct, Xcv = _pool(Xct), _pool(Xcv)        # cavity uses pooled (global) features
+        # Pick feature source for cavity: spatial cavity head needs the [N,P,D] patch grid;
+        # global head uses pooled CLS-style vectors.
+        if use_spatial_cav:
+            cav_feats = feats_grid if feats_grid is not None else feats
+            cav_dim = dim_grid if dim_grid is not None else dim
+        else:
+            cav_feats, cav_dim = feats, dim
+        Xct, ct = _gather(c_tr, cav_feats, device)
+        Xcv, cv = _gather(c_val, cav_feats, device)
+        if not use_spatial_cav:
+            Xct, Xcv = _pool(Xct), _pool(Xcv)         # global cavity head: pooled features
         yct = torch.tensor(ct["cavity"].to_numpy(np.float32)).to(device)
         ycv = torch.tensor(cv["cavity"].to_numpy(np.float32)).to(device)
         cav_head, cav_ce, cav_thr = _train_cav(
-            Xct, yct, Xcv, ycv, dim, loss=cfg.cavity_loss, calibrate=cfg.cavity_cal,
+            Xct, yct, Xcv, ycv, cav_dim, loss=cfg.cavity_loss, calibrate=cfg.cavity_cal,
             args=args, device=device, seed=seed,
+            head_kind="spatial" if use_spatial_cav else "global",
         )
-        cav_prob_te = _cav_prob(cav_head, _pool(Xte))
+        # cavity prob on test features (matching the head's expected input shape)
+        def _cav_input(df_subset):
+            Xc, _ = _gather(df_subset, cav_feats, device)
+            return Xc if use_spatial_cav else _pool(Xc)
+        cav_prob_te = _cav_prob(cav_head, _cav_input(test_df))
+        cav_prob_aval = _cav_prob(cav_head, _cav_input(a_val))   # for fusion blend / conformal
 
     # ── assemble Timika + evaluate (mode-specific) ──
     alp_true = te["alp_0_100"].to_numpy(np.float32)
@@ -346,7 +402,7 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
                                         device=device, seed=seed + 7, M=M)
         alp_te, _ = ensemble_mean([_reg_predict(h, Xte) for h in alp_heads])
         alp_va, _ = ensemble_mean([_reg_predict(h, Xval) for h in alp_heads])
-        cav_va = _cav_prob(cav_head, _pool(Xval))
+        cav_va = cav_prob_aval
         t_a2_te = alp_te * 100.0 + CAV_BONUS * (cav_prob_te > cav_thr)
         t_a3_te = reg_te * 140.0
         t_a2_va = alp_va * 100.0 + CAV_BONUS * (cav_va > cav_thr)
@@ -376,7 +432,7 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         elif mode == "fusion":
             va_t_pred = w * t_a2_va + (1 - w) * t_a3_va
         else:
-            va_t_pred = reg_va * 100.0 + CAV_BONUS * (_cav_prob(cav_head, _pool(Xval)) > cav_thr)
+            va_t_pred = reg_va * 100.0 + CAV_BONUS * (cav_prob_aval > cav_thr)
         va_t_true = (_timika_target(va).cpu().numpy() * 140.0)
         conf = split_conformal(va_t_true, va_t_pred, timika_pred, timika_true, alpha=0.1)
         cov, width = conf["coverage"], conf["mean_width"]
@@ -414,6 +470,25 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
     pd.DataFrame({"image_id": te["image_id"].to_numpy(), "held_out": held_out, "seed": seed,
                   "rung": cfg.name, "timika_true": timika_true, "timika_pred": timika_pred}
                  ).to_csv(out_dir / f"preds_{mode}_{cfg.name}_{held_out}_s{seed}.csv", index=False)
+
+    # Optionally pickle trained heads for local qualitative-figure generation later.
+    if getattr(args, "save_heads", False):
+        heads_dir = out_dir / "heads"
+        heads_dir.mkdir(exist_ok=True)
+        artefact = {
+            "mode": mode, "rung": cfg.name, "held_out": held_out, "seed": seed,
+            "cfg": cfg.__dict__,
+            "reg_heads": [h.state_dict() for h in heads],
+            "reg_kind": cfg.alp_head, "spatial_reg": spatial,
+            "alpha": float(alpha), "cav_thr": float(cav_thr),
+        }
+        if mode in ("a2", "fusion", "a1"):
+            artefact["cav_head"] = cav_head.state_dict()
+            artefact["cav_head_kind"] = "spatial" if use_spatial_cav else "global"
+        if mode == "fusion":
+            artefact["alp_heads"] = [h.state_dict() for h in alp_heads]
+            artefact["fusion_w"] = float(w)
+        torch.save(artefact, heads_dir / f"{mode}_{cfg.name}_{held_out}_s{seed}.pt")
     return row
 
 
@@ -424,10 +499,13 @@ _MANIFEST: pd.DataFrame | None = None
 def main(argv=None) -> None:
     global _MANIFEST
     p = argparse.ArgumentParser(description="Agentic Timika trainer (modes a2/a3/fusion/a1, rungs 1-6).")
-    p.add_argument("--features", required=True)
+    p.add_argument("--features", required=True, help="Primary feature cache (.npz). CLS [N,D] for a2/a3/fusion or patch grid [N,P,D] for a1.")
+    p.add_argument("--features-grid", default=None, help="Optional patch-grid cache for spatial cavity head (a2/a3/fusion). Not used by a1 (which already loads grid as --features).")
     p.add_argument("--manifest", required=True)
     p.add_argument("--mode", default="a2", choices=["a2", "a3", "fusion", "a1"])
     p.add_argument("--rungs", nargs="+", type=int, default=[1, 2, 3, 4, 5, 6])
+    p.add_argument("--ensemble-m", type=int, default=5, help="Ensemble members for rung6 / agentic_best (Rung 6 multiplier).")
+    p.add_argument("--save-heads", action="store_true", help="Pickle trained ALP+cavity heads per (rung, country, seed) into the out dir.")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--held-outs", nargs="+", default=["Romania", "Moldova", "Kazakhstan"])
     p.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
@@ -444,12 +522,21 @@ def main(argv=None) -> None:
     device = pick_device()
     feats, dim = load_features(args.features)
     sample = next(iter(feats.values()))
-    grid = "grid" if sample.ndim == 2 else "CLS"
-    print(f"[agentic] device={device} mode={args.mode} dim={dim} feat={grid} "
-          f"rungs={args.rungs} seeds={args.seeds}")
+    primary_kind = "grid" if sample.ndim == 2 else "CLS"
+    feats_grid, dim_grid = (None, None)
+    if args.features_grid:
+        feats_grid, dim_grid = load_features(args.features_grid)
+        gsample = next(iter(feats_grid.values()))
+        if gsample.ndim != 2:
+            raise SystemExit(f"--features-grid must be a [N,P,D] patch grid cache (got ndim={gsample.ndim+1})")
+        print(f"[agentic] aux grid cache loaded: dim={dim_grid} P={gsample.shape[0]}")
+    grid_available = feats_grid is not None or (args.mode == "a1" and primary_kind == "grid")
+    print(f"[agentic] device={device} mode={args.mode} dim={dim} feat={primary_kind} "
+          f"grid_available={grid_available} rungs={args.rungs} seeds={args.seeds} M={args.ensemble_m}")
     _MANIFEST = load_manifest(args.manifest)
 
-    ladder = rung_ladder(args.mode, args.rungs)
+    ladder = rung_ladder(args.mode, args.rungs, ensemble_M=args.ensemble_m,
+                         grid_available=grid_available)
     print(f"[agentic] {len(ladder)} configs: {[c.name for c in ladder]}")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -458,7 +545,8 @@ def main(argv=None) -> None:
     for cfg in ladder:
         for held_out in args.held_outs:
             for seed in args.seeds:
-                rows.append(run_cell(args.mode, held_out, seed, feats, dim, args, device, cfg, out_dir))
+                rows.append(run_cell(args.mode, held_out, seed, feats, dim, args, device, cfg, out_dir,
+                                      feats_grid=feats_grid, dim_grid=dim_grid))
                 pd.DataFrame(rows).to_csv(out_dir / f"results_agentic_{args.mode}.csv", index=False)
 
     dfr = pd.DataFrame(rows)
