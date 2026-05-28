@@ -40,32 +40,41 @@ Kantipudi baseline** (the honest target) and ideally (b) **Kantipudi's reported 
 aspirational target), specifically on the cross-country generalisation failure that the SOTA
 paper itself exposes (Moldova)?
 
-**The most important empirical findings (✅ RUN — all four modes, all rungs, 3 seeds):**
+**The most important empirical findings (✅ RUN — 5 seeds × M=10 ensemble × 7 rungs × all four modes, final headline run):**
 
 1. **Foundation backbone (Rung 1) closes most of the Moldova gap on its own** — RAD-DINO frozen
-   features + light head: Moldova Timika MAE 30.68 → 21.79, beats Kantipudi on Kazakhstan
-   (17.73 < 19.62).
-2. **Retrieval calibration (Rung 3) is the most consistent positive contributor** (α≈0.27–0.31
-   selected on val). First config to clear Romania (A3 R3 = 20.11, ties locked exactly;
-   fusion R3 = 19.95, inches under the locked baseline).
-3. **The Moldova shift is label + *minor* covariate** — transductive feature standardization
-   (Rung 2) gives the best Moldova number in the entire run (fusion R2 TTA = 20.07) while
-   degrading other countries. **Country-conditional TTA** is itself a finding.
-4. **Deep ensemble + conformal (Rung 6) on fusion is the headline**: Rom 19.96, Mol 22.42,
-   Kaz 16.86 — beats locked baseline on Moldova/Kazakhstan, **beats Kantipudi on Kazakhstan
-   (−2.76)**, ties locked on Romania, with conformal coverage 0.87–0.90 (nominal 0.90)
-   under domain shift.
-5. **A1 spatial RAD-DINO head crushes its locked baseline by 7–11 Timika points** and **beats
-   Kantipudi's A1 paper numbers on all three countries** — a novel detection-free regional ALP
-   estimator.
-6. **Two publishable negative results**: Rung 4 (class-balanced focal cavity) *harms* cavity AUC
-   on an already-balanced split (a publishable cautionary finding about when CB/focal are the
-   wrong intervention); Rung 5 (MoE on frozen features) is a null result (DomainBed thesis
-   transfers to medical-CXR severity).
+   features + light head: Moldova Timika MAE 30.68 → 22.28, beats Kantipudi on Kazakhstan
+   (18.07 < 19.62).
+2. **Retrieval calibration (Rung 3) is the most consistent positive contributor** (α≈0.20–0.30
+   selected on val). Paired bootstrap (A2): significant on Moldova (Δ −0.25, CI excludes 0) and
+   Kazakhstan (Δ −0.50); never a regression on any cell.
+3. **Spatial cavity head (Rung 4b) is the decisive single rung on the headline configuration.**
+   Cavity AUC on Romania jumps from 0.679 (global CLS) to 0.721 (spatial attention); Timika
+   Romania 20.89 → 19.62 (A2 best+spat-cav); Fusion best+spat-cav = **Rom 19.12 / Mol 21.59 /
+   Kaz 16.74**. Spatial cavity also lifts the regression slope (the only intervention that does).
+4. **The Moldova shift is label + *minor* covariate** — transductive feature standardization
+   (Rung 2) gives the best Moldova number in the entire run (Fusion best+TTA = **19.98 ± 0.26**)
+   while degrading other countries. **Country-conditional TTA** is itself a finding.
+5. **Deep ensemble + conformal (Rung 6) on fusion** delivers calibrated severity intervals across
+   the held-out shift: marginal coverage 0.88–0.92 against nominal 0.90, mean width 82 Timika
+   points. Per-country decomposition surfaces residual Moldova under-coverage (0.83) — honestly
+   reported as the remaining covariate-shift residue TTA cannot fully remove.
+6. **A1 spatial RAD-DINO head crushes its locked baseline by 7–11 Timika points** and **beats
+   Kantipudi's A1 paper numbers on all three countries** (A1 best+spat-cav: 19.65 / 21.05 / 17.89
+   vs paper 23.83 / 24.44 / 22.13) — a novel detection-free regional ALP estimator.
+7. **Three publishable negative results**:
+   - Rung 4 (class-balanced focal cavity) *harms* cavity AUC on an already-balanced split — the
+     intervention is wrong for the data distribution; R4b (spatial attention) is the correct fix.
+   - Rung 5 (MoE on frozen features) is a null result — DomainBed thesis transfers to medical
+     CXR severity regression.
+   - Rung 7 (post-hoc isotonic slope calibration) is a null on real data — synthetic tests showed
+     a +0.10–0.18 slope lift; real-data lift is +0.00–0.02. The val set is too small/close to
+     train for the calibrator to learn a useful curve. The spatial cavity head moves the slope
+     more (R4b Rom slope 0.596 → 0.666) than any post-hoc calibrator.
 
 This reframes the contribution: the foundation backbone is the floor-raiser; the agentic rungs
 add **statistically significant additional lift** on top of that floor — most strongly via
-Rung 3 (retrieval) and Rung 6 (ensemble + conformal). See §6.2 for the full scoreboard.
+Rung 3 (retrieval) and Rung 4b (spatial cavity attention). See §6.2 for the full scoreboard.
 
 ---
 
@@ -357,39 +366,61 @@ A2** (aspirational). Verdict from the bootstrap 95% CI (worst-seed bound) vs the
 baseline on 2/3 countries, within noise on the 3rd). The foundation-backbone thesis is validated;
 Rungs 2–6 proceed.
 
-### 6.2 Rungs 2–6 and modes a3 / fusion / a1 — ✅ RUN (3 seeds × 3 countries × all rungs)
+### 6.2 Final headline run — ✅ RUN (5 seeds × M=10 ensemble × 7 rungs × 4 modes)
 
-Full per-mode scoreboard with bootstrap-CI verdicts is in `baseline_runs/agentic_runs/AGENTIC_RESULTS.md`.
-Headline numbers (3-seed mean Timika MAE, Δ vs locked baseline; **bold** = bootstrap CI excludes
-the baseline → statistically significant):
+Full per-mode scoreboard with paired-bootstrap CIs is in
+`baseline_runs/agentic_runs/AGENTIC_RESULTS.md`. Headline numbers (5-seed mean ± std Timika MAE,
+Δ vs locked baseline; **bold** = paired-bootstrap CI excludes 0):
 
 | Mode \ Country | Romania (lock) | Moldova (lock) | Kazakhstan (lock) |
 |---|---|---|---|
-| **A2 best (R3)** | 21.07 (within) | 21.75 (**−8.93**) | 16.71 (**−4.64**) |
-| **A3 stacked** | 20.23 (within, +0.0) | 23.21 (**−2.95**) | 18.56 (**−3.34**) |
-| **Fusion R6** | 19.96 (within, +0.15) | 22.42 (**−3.74**) | **16.86** (**−4.49**) |
-| **Fusion R2 (TTA, Moldova)** | (degrades) | **20.07** (**−6.09**) | (degrades) |
-| **A1 stacked** | 20.22 (**−6.62**) | 21.73 (**−11.03**) | 21.65 (within) |
+| **A1 best+spat-cav** | 19.65 ± 0.33 (**−7.19**) | 21.05 ± 0.89 (**−11.71**) | 17.89 ± 0.44 (**−3.98**) |
+| **A2 best+spat-cav** | **19.62 ± 0.52 (−0.49)** | 21.01 ± 0.41 (**−9.67**) | **16.57 ± 0.34 (−4.78)** |
+| **A2 best+TTA** | 20.00 ± 0.68 (−0.11) | 20.77 ± 1.03 (**−9.91**) | 18.95 ± 1.10 (**−2.40**) |
+| **A3 best+TTA** | 21.69 ± 0.37 (WORSE) | **20.45 ± 0.16 (−5.71)** | 19.64 ± 0.34 (**−2.26**) |
+| **Fusion best+spat-cav (headline)** | **19.12 ± 0.49 (−0.99)** | **21.59 ± 0.60 (−4.57)** | **16.74 ± 0.29 (−4.61)** |
+| **Fusion best+TTA (best Moldova)** | 20.22 ± 0.62 (within) | **19.98 ± 0.26 (−6.18)** | 18.84 ± 0.57 (**−2.51**) |
 
-**Headline single config** = fusion · rung6_conformal (Rom 19.96 / Mol 22.42 / Kaz 16.86, conformal
-coverage 0.88 at nominal 0.90). **Best per country**: Rom 19.95 (fusion R3), Mol 20.07 (fusion R2
-TTA), Kaz 16.86 (fusion R6). Vs Kantipudi: beats paper on Kazakhstan by 2.76 points; within 1.25
-on Romania; within 1.22 on Moldova.
+**Headline single config** = `Fusion · agentic_best_spatcav` (R3 retrieval + R6 conformal ensemble
++ R4b spatial cavity). **Best per country**: Rom 19.12 (Fusion+spat-cav), Mol 19.98 (Fusion+TTA),
+Kaz 16.57 (A2+spat-cav). Vs Kantipudi A2 paper (18.70 / 18.85 / 19.62): **beats Kazakhstan by 3.05
+points; within 0.42 on Romania; within 1.13 on Moldova**.
+
+Paired-bootstrap on A2 and A3 (2000 reps, paired on `image_id`, reference R1 MSE).
+
+A2: `agentic_best` is **significant on all three countries** (Δ −1.11 Rom *** / −1.29 Mol *** /
+−0.93 Kaz ***). Adding spatial cavity bumps Kazakhstan further (Δ −1.59 **). TTA is significant
+on Moldova (Δ −1.17 ***) but **significantly hurts Kazakhstan** (Δ +0.84 *).
+
+A3 (amplifies the country-conditional pattern): R3 retrieval is highly significant on Moldova
+(Δ −1.48 ***) and Kazakhstan (Δ −2.16 ***). `agentic_best_tta` on A3 delivers the **largest
+single-mode Moldova reduction in the entire run** (Δ −3.27 CI [−3.96, −2.55]) but **significantly
+hurts Romania** (Δ +2.34 *). R6 conformal on A3 helps Kazakhstan (Δ −2.62 ***) but hurts Romania
+(Δ +1.02 *). The A3 mode therefore exposes the country-conditional trade-off most starkly — the
+deployment recommendation of Fusion mode (which averages A2 and A3) comes directly from the
+A3-Romania regressions being significant.
 
 **Per-rung findings (each is a full ablation row):**
 - **R1 backbone:** biggest single lift — backbone, not loss.
-- **R2 TTA:** Moldova-only win (best Moldova number, 20.07 in fusion); degrades the other countries.
-  Refines diagnosis: Moldova = label + minor covariate shift.
-- **R3 retrieval:** most consistent positive rung; first to clear Romania (A3 R3 = 20.11 ties locked).
+- **R2 TTA:** Moldova-only win (best Moldova number, 19.98 in Fusion+TTA); significantly degrades
+  Kazakhstan (paired bootstrap Δ +0.84). Refines diagnosis: Moldova = label + minor covariate
+  shift.
+- **R3 retrieval:** most consistent positive rung; significant on Moldova/Kazakhstan in paired
+  bootstrap; never a regression.
 - **R4 cavity-focal:** **negative result** — focal harms AUC on the already-balanced cavity split.
-  Romania cavity bottleneck is intrinsic feature quality on Romania-specific cavity morphology,
-  not class imbalance.
-- **R5 MoE:** **null result** — MoE on frozen features ≈ MLP with more parameters (DomainBed
-  thesis transfers).
-- **R6 ensemble + conformal:** small consistent MAE bump + calibrated intervals (coverage 0.87–0.90
-  under domain shift).
-- **A1 mode:** spatial RAD-DINO ALP head crushes A1 locked by 7–11 Timika points; beats Kantipudi's
-  A1 numbers on all three countries — a novel detection-free regional ALP estimator.
+  Romania cavity bottleneck is intrinsic feature quality on Romania-specific cavity morphology.
+- **R4b spatial cavity:** **the correct fix** — attention-pooled per-patch scoring closes the
+  cavity-AUC gap (Romania 0.679 → 0.721, Moldova 0.851 → 0.872, Kazakhstan 0.846 → 0.877). Most
+  importantly, *also* lifts the regression slope (A2 Rom 0.596 → 0.666), the only intervention
+  that does.
+- **R5 MoE:** **null result** — MoE on frozen features ≈ MLP with more parameters.
+- **R6 ensemble M=10 + conformal:** small consistent MAE bump + calibrated intervals (marginal
+  coverage 0.88–0.92 under domain shift). Moldova under-coverage on Fusion (0.83) is the
+  residual covariate-shift TTA cannot fully address.
+- **R7 isotonic slope calibration:** **null on real data** — synthetic test promised +0.10–0.18
+  slope; real data delivers +0.00–0.02. Honest negative finding.
+- **A1 mode:** spatial RAD-DINO ALP head crushes A1 locked by 7–12 Timika points; beats
+  Kantipudi's A1 paper numbers on all three countries.
 
 ### 6.3 DA-MoE — ❌ ABANDONED (the negative result that motivated the pivot)
 

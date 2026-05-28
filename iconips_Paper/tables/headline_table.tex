@@ -1,0 +1,45 @@
+\begin{table}[t]
+\centering
+\caption{Cross-country Timika-MAE on the Kantipudi LOCO splits. Held-out countries: Romania, Moldova, Kazakhstan. Numbers are mean$\pm$std across 5 seeds. The Kantipudi 2024 paper row reproduces their reported A1/A2/A3 numbers; our locked baseline is our faithful DenseNet121 replication; the remaining rows are the proposed agentic ladder. Lower is better; bold = best in column.}
+\label{tab:headline}
+\setlength{\tabcolsep}{4pt}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l l c c c c}
+\toprule
+Mode & Configuration & Romania & Moldova & Kazakhstan & Mean \\
+\midrule
+\multicolumn{6}{l}{\textit{Reference (no agentic intervention)}} \\
+A1 & Kantipudi 2024 \cite{kantipudi2024} & 23.83 & 24.44 & 22.13 & 23.47 \\
+A2 & Kantipudi 2024 \cite{kantipudi2024} & 18.70 & 18.85 & 19.62 & 19.06 \\
+A3 & Kantipudi 2024 \cite{kantipudi2024} & 20.10 & 19.96 & 20.81 & 20.29 \\
+A1 & Locked DenseNet baseline & 26.84 & 32.76 & 21.87 & 27.16 \\
+A2 & Locked DenseNet baseline & 20.11 & 30.68 & 21.35 & 24.05 \\
+A3 & Locked DenseNet baseline & 20.26 & 26.16 & 21.90 & 22.77 \\
+\midrule
+\multicolumn{6}{l}{\textit{Proposed agentic ladder (frozen RAD-DINO features)}} \\
+\midrule
+A1 & R1: BMC head & 20.34$\pm$0.84 & 23.09$\pm$2.89 & 18.96$\pm$0.93 & 20.80 \\
+A1 & R4b: +spatial cavity & 19.98$\pm$0.60 & 21.40$\pm$1.79 & 17.81$\pm$0.52 & 19.73 \\
+A1 & \textbf{best+spat-cav} & 19.65$\pm$0.33 & 21.05$\pm$0.89 & 17.89$\pm$0.44 & 19.53 \\
+\midrule
+A2 & R1: BMC head & 21.19$\pm$0.97 & 22.52$\pm$0.66 & 17.81$\pm$0.99 & 20.51 \\
+A2 & R3: +retrieval & 20.85$\pm$0.82 & 21.93$\pm$0.53 & 17.51$\pm$1.15 & 20.09 \\
+A2 & R4b: +spatial cavity & 20.01$\pm$0.84 & 21.78$\pm$1.11 & 16.99$\pm$0.23 & 19.59 \\
+A2 & \textbf{best+spat-cav} & 19.62$\pm$0.52 & 21.01$\pm$0.41 & \textbf{16.57$\pm$0.34} & 19.07 \\
+A2 & \textbf{best+TTA} & 20.00$\pm$0.68 & 20.77$\pm$1.03 & 18.95$\pm$1.10 & 19.91 \\
+\midrule
+A3 & R1: BMC head & 21.07$\pm$0.50 & 23.74$\pm$1.45 & 18.46$\pm$0.33 & 21.09 \\
+A3 & R3: +retrieval & 20.20$\pm$0.65 & 22.36$\pm$1.09 & 18.69$\pm$0.41 & 20.42 \\
+A3 & \textbf{best (R3+R6)} & 20.25$\pm$0.41 & 23.15$\pm$0.54 & 18.50$\pm$0.19 & 20.63 \\
+A3 & \textbf{best+TTA} & 21.69$\pm$0.37 & 20.45$\pm$0.16 & 19.64$\pm$0.34 & 20.59 \\
+\midrule
+Fusion & R1: BMC head & 20.07$\pm$0.22 & 21.92$\pm$0.59 & 17.32$\pm$0.60 & 19.77 \\
+Fusion & R3: +retrieval & 19.80$\pm$0.24 & 21.44$\pm$0.54 & 17.39$\pm$0.56 & 19.54 \\
+Fusion & R4b: +spatial cavity & 19.43$\pm$0.36 & 21.44$\pm$0.67 & 16.79$\pm$0.35 & 19.22 \\
+Fusion & \textbf{best (R3+R6)} & 19.76$\pm$0.40 & 21.91$\pm$0.46 & 17.28$\pm$0.62 & 19.65 \\
+Fusion & \textbf{best+TTA} & 20.22$\pm$0.62 & \textbf{19.98$\pm$0.26} & 18.84$\pm$0.57 & 19.68 \\
+Fusion & \textbf{best+spat-cav} & \textbf{19.12$\pm$0.49} & 21.59$\pm$0.60 & 16.74$\pm$0.29 & 19.15 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

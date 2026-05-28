@@ -1,0 +1,23 @@
+\begin{table}[t]
+\centering\small
+\caption{A2-mode per-rung ablation: Timika MAE (mean$\\pm$std, 5 seeds). Lower is better; bold = best in column.}}
+\label{tab:abl_a2}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c c c}
+\toprule
+Configuration & Romania & Moldova & Kazakhstan \\
+\midrule
+R1 (MSE) & 20.89$\pm$1.36 & 22.28$\pm$0.50 & 18.07$\pm$1.11 \\
+R1 (BMC) & 21.19$\pm$0.97 & 22.52$\pm$0.66 & 17.81$\pm$0.99 \\
++R2 TTA & 21.03$\pm$0.59 & 21.56$\pm$1.13 & 19.59$\pm$1.27 \\
++R3 retrieval & 20.85$\pm$0.82 & 21.93$\pm$0.53 & 17.51$\pm$1.15 \\
++R4b spat-cav & 20.01$\pm$0.84 & 21.78$\pm$1.11 & 16.99$\pm$0.23 \\
++R5 sev-MoE & 21.96$\pm$1.76 & 22.42$\pm$0.89 & 18.30$\pm$1.04 \\
++R6 conf+ens & 21.02$\pm$0.74 & 22.32$\pm$0.30 & 17.50$\pm$0.94 \\
++R7 isotonic & 20.68$\pm$0.79 & 22.62$\pm$0.29 & 17.93$\pm$1.14 \\
+\textit{best (R3+R6)} & 20.86$\pm$0.72 & 21.87$\pm$0.52 & 17.38$\pm$1.04 \\
+\textit{best+spat-cav} & \textbf{19.62$\pm$0.52} & 21.01$\pm$0.41 & \textbf{16.57$\pm$0.34} \\
+\textit{best+TTA} & 20.00$\pm$0.68 & \textbf{20.77$\pm$1.03} & 18.95$\pm$1.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
