@@ -42,7 +42,8 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description="Cache frozen backbone features for the agentic pipeline.")
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--backbone", default="rad-dino", choices=["rad-dino", "txrv", "densenet"])
+    ap.add_argument("--backbone", default="rad-dino",
+                    choices=["rad-dino", "biomedclip", "dinov2-natural", "txrv", "densenet"])
     ap.add_argument("--model-id", default=None, help="Override HF model id (rad-dino only).")
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--patch-grid", type=int, default=0,

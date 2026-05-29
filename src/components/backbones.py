@@ -129,11 +129,71 @@ class DenseNetBackbone:
         return self.model(x).float().cpu().numpy()
 
 
+class BioMedCLIPBackbone:
+    """BioMedCLIP visual encoder (frozen). Loaded via open_clip from HF Hub."""
+    name = "biomedclip"
+
+    def __init__(self, device: torch.device,
+                 model_id: str = "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"):
+        from open_clip import create_model_from_pretrained
+        model, preprocess = create_model_from_pretrained(model_id)
+        self.model = model.visual.to(device).eval()
+        self.preprocess = preprocess
+        self.device = device
+        # ViT-B/16: width 768
+        self.dim = 768
+
+    @torch.inference_mode()
+    def embed(self, images: list[Image.Image]) -> np.ndarray:
+        x = torch.stack([self.preprocess(im.convert("RGB")) for im in images]).to(self.device)
+        out = self.model(x)
+        # open_clip visual returns a single pooled feature [N, D]
+        if isinstance(out, tuple):
+            out = out[0]
+        return out.float().cpu().numpy()
+
+    @torch.inference_mode()
+    def embed_grid(self, images: list[Image.Image], grid: int = 7) -> np.ndarray:
+        """Pooled patch-token grid via hook on the transformer."""
+        x = torch.stack([self.preprocess(im.convert("RGB")) for im in images]).to(self.device)
+        # Use forward pre-final-norm patch tokens.
+        # open_clip ViT exposes .trunk or .transformer; we monkey-patch a hook.
+        feats: dict = {}
+        def _hook(module, inp, out):
+            feats["tokens"] = out
+        # last block's residual stream
+        try:
+            handle = self.model.transformer.resblocks[-1].register_forward_hook(_hook)
+        except AttributeError:
+            handle = self.model.trunk.blocks[-1].register_forward_hook(_hook)
+        _ = self.model(x)
+        handle.remove()
+        toks = feats["tokens"]                              # [seq, N, D] or [N, seq, D]
+        if toks.shape[0] != x.shape[0]:                     # open_clip default: [seq, N, D]
+            toks = toks.permute(1, 0, 2)                    # -> [N, seq, D]
+        toks = toks[:, 1:, :]                               # drop CLS
+        return _pool_tokens_to_grid(toks, grid).float().cpu().numpy()
+
+
+class Dinov2NaturalBackbone(RadDinoBackbone):
+    """DINOv2-natural (Facebook). Same HF interface as RAD-DINO; different weights."""
+    name = "dinov2-natural"
+
+    def __init__(self, device: torch.device, model_id: str = "facebook/dinov2-base"):
+        super().__init__(device, model_id=model_id)
+
+
 def build_backbone(name: str, device: torch.device, model_id: str | None = None):
     if name == "rad-dino":
         return RadDinoBackbone(device, model_id or "microsoft/rad-dino")
+    if name == "biomedclip":
+        return BioMedCLIPBackbone(device,
+                                  model_id or "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224")
+    if name == "dinov2-natural":
+        return Dinov2NaturalBackbone(device, model_id or "facebook/dinov2-base")
     if name == "txrv":
         return TorchXRVBackbone(device)
     if name == "densenet":
         return DenseNetBackbone(device)
-    raise ValueError(f"unknown backbone {name!r} (use rad-dino | txrv | densenet)")
+    raise ValueError(f"unknown backbone {name!r} "
+                     f"(use rad-dino | biomedclip | dinov2-natural | txrv | densenet)")

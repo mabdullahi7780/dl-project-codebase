@@ -600,6 +600,73 @@ def make_ablation_table(df: pd.DataFrame) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 # Paired bootstrap significance table (vs locked baseline = our R1 MSE)
 # ──────────────────────────────────────────────────────────────────────────
+def bonferroni_holm(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
+    """Return boolean significance mask after Bonferroni-Holm step-down at family-wise alpha."""
+    n = len(p_values)
+    order = np.argsort(p_values)
+    sig = np.zeros(n, dtype=bool)
+    for rank, idx in enumerate(order):
+        threshold = alpha / (n - rank)
+        if p_values[idx] <= threshold:
+            sig[idx] = True
+        else:
+            break
+    return sig
+
+
+def fig_significance_forest(df: pd.DataFrame) -> None:
+    """Per-rung forest plot of Delta-MAE with 95% CIs across countries."""
+    bt = pd.read_csv(TAB_DIR / "paired_bootstrap.csv")
+    bt_a2 = bt[bt["mode"] == "a2"].copy()
+    if bt_a2.empty:
+        return
+
+    rungs_order = ["rung1_bmc", "rung2_tta", "rung3_retrieval", "rung4b_spatial_cavity",
+                   "rung6_conformal", "agentic_best", "agentic_best_spatcav", "agentic_best_tta"]
+    rung_label = {
+        "rung1_bmc": "R1 BMC", "rung2_tta": "+R2 TTA",
+        "rung3_retrieval": "+R3 retr.", "rung4b_spatial_cavity": "+R4b spat-cav",
+        "rung6_conformal": "+R6 conf.", "agentic_best": "best (R3+R6)",
+        "agentic_best_spatcav": "best+spat-cav", "agentic_best_tta": "best+TTA",
+    }
+
+    fig, axes = plt.subplots(1, 3, figsize=(7.4, 3.0), sharey=True)
+    for ax, c in zip(axes, COUNTRIES):
+        sub = bt_a2[bt_a2["country"] == c].set_index("rung")
+        # one-sided p-value approximation from bootstrap fraction
+        rungs_here = [r for r in rungs_order if r in sub.index]
+        # use frac_a_better column if present, else compute from CI
+        # paired bootstrap CSV from main script doesn't include p-value; compute approx via CI sign
+        # We approximate: assume normality, std ~ (hi-lo)/3.92, p = 2*sf(|delta/std|)
+        from scipy.stats import norm
+        deltas = sub.loc[rungs_here, "delta"].values
+        lo = sub.loc[rungs_here, "ci_lo"].values
+        hi = sub.loc[rungs_here, "ci_hi"].values
+        se = (hi - lo) / 3.92
+        p = 2 * norm.sf(np.abs(deltas) / np.maximum(se, 1e-9))
+        sig_mask = bonferroni_holm(p, alpha=0.05)
+
+        y_positions = np.arange(len(rungs_here))[::-1]
+        for i, (yi, d, l, h, m) in enumerate(zip(y_positions, deltas, lo, hi, sig_mask)):
+            colour = "#2a8b34" if d < 0 and m else ("#a73229" if d > 0 and m else "#999")
+            ax.plot([l, h], [yi, yi], color=colour, linewidth=2.2)
+            ax.plot([d], [yi], "o", color=colour, markersize=4)
+            if m:
+                ax.text(h + 0.06, yi, "*", color=colour, va="center", fontsize=10, fontweight="bold")
+        ax.axvline(0, color="black", linestyle="--", linewidth=0.7)
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels([rung_label[r] for r in rungs_here], fontsize=8)
+        ax.set_title(f"{c}  (n={sub['n'].iloc[0]:.0f})")
+        ax.set_xlabel(r"$\Delta$ Timika MAE vs R1 MSE")
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+    fig.suptitle("Paired-bootstrap $\\Delta$-MAE with Bonferroni-Holm-corrected significance (A2 mode)",
+                 fontsize=9, y=1.02)
+    plt.tight_layout()
+    out = FIG_DIR / "fig_significance_forest.pdf"
+    plt.savefig(out, bbox_inches="tight"); plt.close()
+    print(f"wrote {out}")
+
+
 def paired_bootstrap_table(df: pd.DataFrame) -> None:
     """Compute Δ-MAE vs R1 MSE with paired-bootstrap 95% CI, pairing on image_id."""
     rng = np.random.default_rng(1337)
@@ -674,6 +741,7 @@ def main():
     fig_slope_cal(df)
     per_severity_table_and_fig(df)
     paired_bootstrap_table(df)
+    fig_significance_forest(df)
 
 
 if __name__ == "__main__":
