@@ -1,0 +1,32 @@
+\begin{table}[t]
+\centering
+\caption{Comparison to published methods on the patient-disjoint LOCO splits. All numbers are Timika MAE (lower is better). Plug-in composite baselines use Cohen et al.'s TorchXRayVision \texttt{lung\_opacity} probe (TXV) as the ALP proxy and Tiu et al.'s CheXzero zero-shot cavity probe (5 seeds for shift-robust rows; deterministic for the zero-shot composites). Bold = best in column.}
+\label{tab:published_baselines}
+\setlength{\tabcolsep}{6pt}
+\small
+\begin{tabular}{l c c c}
+\toprule
+Method & Romania & Moldova & Kazakhstan \\
+\midrule
+\multicolumn{4}{l}{\textit{Plug-in composite baselines (zero-shot probes, no training)}} \\
+TXV-only (no cavity)~\cite{cohen2022torchxrayvision}        & 37.15 & 37.47 & 31.08 \\
+CheXzero-only ($\times 40$)~\cite{tiu2022chexzero}          & 32.00 & 35.03 & 27.22 \\
+TXV $+$ CheXzero (composite)                                & 24.02 & 26.37 & 27.76 \\
+\midrule
+\multicolumn{4}{l}{\textit{Published shift-robust learners on TXV features, 5 seeds}} \\
+GroupDRO~\cite{sagawa2020distributionally}                   & 23.54$\pm$1.85 & 27.58$\pm$1.14 & 25.30$\pm$0.25 \\
+Importance-Weighted reg.~\cite{shimodaira2000improving}      & 22.82$\pm$1.82 & 28.18$\pm$1.37 & 25.25$\pm$0.78 \\
+\midrule
+\multicolumn{4}{l}{\textit{K24~\cite{kantipudi2024} approach family, our local replication}$^\ast$} \\
+A1: Single-Head ALP, DenseNet                                & 26.74 & 32.86 & 27.69 \\
+A2: Dual-Head, DenseNet                                      & 20.11 & 30.68 & 21.35 \\
+A3: Dual-Task, DenseNet                                      & 19.96 & 28.18 & 19.46 \\
+\midrule
+\multicolumn{4}{l}{\textit{Ours: frozen RAD-DINO + agentic ladder, 5 seeds}} \\
+Fusion + R3 + R6 (\texttt{best})                             & 19.76$\pm$0.40 & 21.91$\pm$0.46 & 17.28$\pm$0.62 \\
+\textbf{Fusion + R3 + R6 + R4b (\texttt{best+spat-cav})}     & \textbf{19.12$\pm$0.49} & \textbf{21.59$\pm$0.60} & \textbf{16.74$\pm$0.29} \\
+\bottomrule
+\end{tabular}
+\\[3pt]
+{\footnotesize $^\ast$K24~\cite{kantipudi2024} do not release patient-disjoint splits. Numbers in these rows are our 5-seed local reproduction of K24's three approach families (SG-ALP $\equiv$ K24-A1; DH $\equiv$ K24-A2; DT $\equiv$ K24-A3) on the publicly reproducible manifest documented in Sec.~5.1 --- not K24's published values.}
+\end{table}

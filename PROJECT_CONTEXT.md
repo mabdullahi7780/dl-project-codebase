@@ -677,6 +677,52 @@ until those experiments are RUN and the CIs support it.**
 
 ---
 
+## 13. Published-method baselines (2026-05-30 addition for ICONIP)
+
+Dr. Taj round-3 feedback was: *"baseline comparisons need to be against
+published works, not internal backbone ablations"*. We now report three
+families of published baselines on our exact LOCO splits — all numbers
+are Timika MAE.
+
+| Method | Romania | Moldova | Kazakhstan | Source |
+|---|---:|---:|---:|---|
+| TXV-only (no cavity)              | 37.15 | 37.47 | 31.08 | Cohen 2020 (TorchXRayVision) |
+| CheXzero-only (cavity × 40)       | 32.00 | 35.03 | 27.22 | Tiu 2022 (CheXzero) |
+| TXV + CheXzero (composite plug-in)| 24.02 | 26.37 | 27.76 | Cohen 2020 + Tiu 2022 |
+| GroupDRO on TXV (5 seeds)         | 23.54 ± 1.85 | 27.58 ± 1.14 | 25.30 ± 0.25 | Sagawa 2020 |
+| Importance-Weighted reg. (5 seeds)| 22.82 ± 1.82 | 28.18 ± 1.37 | 25.25 ± 0.78 | Shimodaira 2000 |
+| K24 method, our replication (5s)  | 26.74 / 20.11 / 19.96 (A1/A2/A3) | 32.86 / 30.68 / 28.18 | 27.69 / 21.35 / 19.46 | Kantipudi 2024† |
+| **Ours: Agentic Fusion + SpatCav**| **19.12** | **21.59** | **16.74** | this work |
+
+† We replicate K24's three approach families locally with 5 seeds because
+the original paper does not release patient-disjoint splits. Asterisked
+numbers in the paper are our trained reproductions, not K24's published
+table.
+
+**Cohort context** (see `iconips_Paper/tables/cohort_summary.csv`):
+
+| Country | Images | Patients | ALP μ/σ | Cavity % | Timika μ/σ |
+|---|---:|---:|---:|---:|---:|
+| Georgia | 1414 | 1412 | 26.6/18.3 | 50.4 | 46.8/29.9 |
+| Ukraine | 1316 | 1306 | 29.8/23.5 | 38.0 | 45.0/35.1 |
+| Belarus | 1052 | 798  | 20.3/23.1 | 24.1 | 30.0/34.3 |
+| **Moldova†**   |  589 | 589 | 39.8/29.9 | 32.8 | 52.9/41.8 |
+| **Kazakhstan†**|  399 | 399 | 22.6/22.8 | 39.8 | 38.5/36.7 |
+| **Romania†**   |  220 | 169 | 31.9/22.9 | 65.0 | 57.9/32.3 |
+| **TOTAL**      | 5010 | 4691 | 27.6/23.6 | 39.3 | 43.3/35.3 |
+
+The cohort table makes the shift explicit: Romania has **65 %** cavity
+prevalence vs Kazakhstan's 40 %; Moldova has the highest ALP mean
+(39.8 vs the 27.6 cohort average). These are exactly the label-shift
+quantities §3 (shift-decomposition framework) decomposes empirically.
+
+All outputs are in `baseline_runs/agentic_runs/paper/`; aggregated tables
+in `baseline_runs/agentic_runs/paper/_extract/aggregated_baselines.md`
+and `iconips_Paper/tables/cohort_summary.csv`.
+
+---
+
 *End of context document. Rewritten 2026-05-28 to reflect the agentic 6-rung pipeline (MoE = Rung 5,
 DANN removed). Rung 1 numbers are RUN; Rungs 2–6 and modes a3/fusion/a1 are implemented but unrun —
-labelled accordingly above.*
+labelled accordingly above. §13 added 2026-05-30 with published-baseline numbers + cohort breakdown
+in response to Dr. Taj feedback round 3.*

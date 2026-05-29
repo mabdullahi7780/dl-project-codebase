@@ -659,7 +659,7 @@ def fig_significance_forest(df: pd.DataFrame) -> None:
         ax.set_title(f"{c}  (n={sub['n'].iloc[0]:.0f})")
         ax.set_xlabel(r"$\Delta$ Timika MAE vs R1 MSE")
         ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-    fig.suptitle("Paired-bootstrap $\\Delta$-MAE with Bonferroni-Holm-corrected significance (A2 mode)",
+    fig.suptitle("Paired-bootstrap $\\Delta$-MAE with Bonferroni-Holm-corrected significance (DH mode)",
                  fontsize=9, y=1.02)
     plt.tight_layout()
     out = FIG_DIR / "fig_significance_forest.pdf"
