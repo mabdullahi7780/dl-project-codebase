@@ -1,0 +1,34 @@
+\begin{table}[!htb]
+\centering
+\caption{Comparison against three families of published methods on identical patient-disjoint LOCO splits. All numbers are Timika MAE. The composite plug-in baselines use Cohen et al.'s TorchXRayVision \texttt{lung\_opacity} probe (TXV) as the ALP proxy and Tiu et al.'s CheXzero zero-shot cavity probe; the shift-robust learners run on TXV features with country as the group variable; the K24 block reports our local 5-seed replication. Bold marks the best in column.}
+\label{tab:published_baselines}
+\setlength{\tabcolsep}{4pt}
+\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l c c c}
+\toprule
+Method & Romania & Moldova & Kazakhstan \\
+\midrule
+\multicolumn{4}{l}{\textit{(i) Plug-in composites from published zero-shot probes}} \\
+TXV-only (no cavity)~\cite{cohen2022torchxrayvision}        & 37.15 & 37.47 & 31.08 \\
+CheXzero-only ($\times 40$)~\cite{tiu2022chexzero}          & 32.00 & 35.03 & 27.22 \\
+TXV $+$ CheXzero (composite)                                & 24.02 & 26.37 & 27.76 \\
+\midrule
+\multicolumn{4}{l}{\textit{(ii) Published shift-robust learners on TXV features (5 seeds)}} \\
+GroupDRO~\cite{sagawa2020distributionally}                  & 23.54$\pm$1.85 & 27.58$\pm$1.14 & 25.30$\pm$0.25 \\
+Importance-Weighted regression~\cite{shimodaira2000improving} & 22.82$\pm$1.82 & 28.18$\pm$1.37 & 25.25$\pm$0.78 \\
+\midrule
+\multicolumn{4}{l}{\textit{(iii) K24~\cite{kantipudi2024} architecture family, our local replication$^{\ast}$}} \\
+SG-ALP (K24-A1, DenseNet)                                   & 26.74 & 32.86 & 27.69 \\
+DH     (K24-A2, DenseNet)                                   & 20.11 & 30.68 & 21.35 \\
+DT     (K24-A3, DenseNet)                                   & 19.96 & 28.18 & 19.46 \\
+\midrule
+\multicolumn{4}{l}{\textit{Ours: frozen RAD-DINO + agentic ladder (5 seeds)}} \\
+Hybrid, R3 + R6                                             & 19.76$\pm$0.40 & 21.91$\pm$0.46 & 17.28$\pm$0.62 \\
+\textbf{Hybrid, R3 + R6 + R4b (recommended)}                & \textbf{19.12$\pm$0.49} & \textbf{21.59$\pm$0.60} & \textbf{16.74$\pm$0.29} \\
+\bottomrule
+\end{tabular}%
+}
+\\[3pt]
+{\footnotesize $^{\ast}$K24 do not release patient-disjoint splits. These rows are our 5-seed local reproduction of K24's three architecture families on the manifest of Sec.~\ref{sec:dataset}, not K24's reported values.}
+\end{table}

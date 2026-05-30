@@ -1,0 +1,7 @@
+country,tag,image_id,timika,image_path
+Romania,healthy,2.25.217153696360788591713605620829541960733,2,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/2.25.217153696360788591713605620829541960733.png
+Romania,severe,2.25.14210295796259087786935205390030337261,125,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/2.25.14210295796259087786935205390030337261.png
+Moldova,healthy,2.25.81761449924503232432466013735265661374,3,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/2.25.81761449924503232432466013735265661374.png
+Moldova,severe,2.25.99467364693329010665588514153751623409,140,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/2.25.99467364693329010665588514153751623409.png
+Kazakhstan,healthy,2.25.150974682827352201336748995680504078913,0,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/2.25.150974682827352201336748995680504078913.png
+Kazakhstan,severe,1.2.826.0.1.3680043.2.1125.1.87035421712506208263096679188227250,136,/kaggle/input/datasets/mabdullahi454/tb-portals-cxr-pngs/kaggle_export/images/1.2.826.0.1.3680043.2.1125.1.87035421712506208263096679188227250.png

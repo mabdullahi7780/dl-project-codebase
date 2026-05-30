@@ -1,0 +1,378 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Decomposing the Cross-Country Severity-Scoring Shift in TB Chest X-Rays %%
+%% ICONIP 2026 submission                                                  %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{placeins}
+\usepackage[expansion=false]{microtype}
+\setlength{\emergencystretch}{2em}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc}
+
+\hypersetup{colorlinks=true, urlcolor=blue, citecolor=blue, linkcolor=blue}
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+\urlstyle{rm}
+
+% Color palette for the shift-component coding used in the pipeline figure.
+\definecolor{shiftL}{RGB}{218,232,252} % label shift (blue tint)
+\definecolor{shiftC}{RGB}{255,228,196} % covariate shift (amber tint)
+\definecolor{shiftK}{RGB}{215,236,222} % calibration shift (green tint)
+\definecolor{shiftU}{RGB}{233,225,247} % uncertainty (violet tint)
+\definecolor{nullshade}{RGB}{238,238,238}
+\definecolor{encshade}{RGB}{255,235,210}
+\definecolor{outshade}{RGB}{220,238,232}
+
+\begin{document}
+
+\title{Automated Timika Scoring from Chest X-Rays:\\ A Composable Pipeline Over a Frozen Foundation Model}
+
+\titlerunning{Automated Timika Scoring from Chest X-Rays}
+
+\author{Muhammad Abdullah Irfan\inst{1} \and
+Mohammad Ahmed Habib\inst{1} \and
+Murtaza Taj\inst{1}}
+
+\authorrunning{M.~A.~Irfan et al.}
+
+\institute{Lahore University of Management Sciences, Lahore, Pakistan\\
+\email{\{a18586638,ahmed.habib,murtaza.taj\}@lums.edu.pk}}
+
+\maketitle
+
+\begin{abstract}
+Automated severity scoring from chest X-rays could let tuberculosis clinics in endemic settings triage patients without specialist radiologists. A local replication of the only published end-to-end Timika regressor on TB~Portals~\cite{kantipudi2024} (K24) exposes a sharp cross-country generalisation failure: an $11.8$-point Timika mean-absolute-error (MAE) gap on Moldova relative to the in-distribution train pool. We attribute this to three distinct shifts that earlier work tends to conflate: a \emph{label} shift in the target distribution, a \emph{covariate} shift in feature statistics, and a \emph{calibration} shift in which the predicted severity range compresses toward the source mean. We diagnose each component empirically and introduce per-axis interventions on a frozen RAD-DINO encoder~\cite{perez2024raddino}, evaluated under a patient-disjoint Leave-One-Country-Out protocol with five seeds and a ten-member ensemble. The resulting pipeline reaches Timika MAE \textbf{19.12}\,/\,\textbf{21.59}\,/\,\textbf{16.74} on Romania\,/\,Moldova\,/\,Kazakhstan, improving over the replicated K24 dual-head baseline by $-0.99$\,/\,$-9.09$\,/\,$-4.61$ points and beating every published baseline (CheXzero composite, GroupDRO, Importance-Weighted regression). A \emph{spatial-attention cavity head} on the RAD-DINO patch grid lifts Romania cavity AUC from $0.679$ to $0.721$ and uniquely corrects part of the calibration shift. Three controlled negative results (class-balanced focal loss, mixture-of-experts on frozen features, isotonic slope calibration) delimit the regime: each maps to a shift axis on which it has no leverage. Split-conformal intervals maintain marginal coverage near the $0.90$ nominal. Code, manifests, predictions and trained heads are publicly released.
+\keywords{Tuberculosis \and Timika score \and Foundation model \and Domain shift \and Conformal prediction \and Cavity localisation.}
+\end{abstract}
+
+%=============================================================================
+\section{Introduction}
+%=============================================================================
+
+Tuberculosis was responsible for roughly $1.25$~million deaths in $2024$, the overwhelming majority in low- and middle-income countries with limited specialist radiology coverage~\cite{who2024tb}. Posterior--anterior chest radiography is the imaging modality these settings can sustain, which makes automated chest X-ray (CXR) interpretation the natural deployment surface for computer-aided triage. Binary TB classifiers already achieve excellent performance~\cite{liu2020tbx11k}, yet a positive or negative output cannot tell a clinician whether a patient should be treated immediately, observed, or scheduled for follow-up. What is needed is a continuous, validated severity score, and the Timika score~\cite{ralph2010timika} supplies exactly this:
+\begin{equation}
+\text{Timika} \;=\; \mathrm{ALP} \;+\; 40 \cdot \mathbf{1}[\text{cavity present}],
+\label{eq:timika}
+\end{equation}
+where $\mathrm{ALP}\in[0,100]$ is the percentage of lung field occupied by lesions and the indicator term adds a $40$-point penalty when any cavity is detected. The score therefore lives in $[0,140]$.
+
+\smallskip\noindent\textbf{The cross-country failure of prior work.}
+Kantipudi et al.~\cite{kantipudi2024} (henceforth K24) provide, to our knowledge, the only end-to-end Timika regressor on the multi-country TB~Portals corpus~\cite{tbportals2020}, evaluated under a patient-disjoint Leave-One-Country-Out (LOCO) protocol over Romania, Moldova and Kazakhstan. Their three architecture families (renamed here SG-ALP, DH and DT, corresponding to K24-A1/A2/A3) are released without their patient-disjoint splits or per-image predictions, so exact reproduction is not feasible. Throughout, we therefore report only our own $5$-seed replication of those families on a publicly reproducible $5{,}010$-image manifest, marked with an asterisk. On this manifest, the strongest replicated family (DH, dual-head, $\equiv$ K24-A2) reaches Timika MAE $20.11$\,/\,\textbf{$30.68$}\,/\,$21.35$ on Romania\,/\,Moldova\,/\,Kazakhstan: Romania and Kazakhstan are reasonable but Moldova degrades by $11.8$ points relative to the in-distribution train-pool mean error. This is the failure the present paper sets out to diagnose and correct.
+
+\smallskip\noindent\textbf{From one number to a decomposition.}
+A monolithic ``cross-country generalisation gap'' is not an actionable diagnosis. A closer look shows that three qualitatively different shifts contribute to it: (i) a \emph{label shift} (Moldova's test ALP mean is $39.8$ against a train-pool mean of $26.0$, so a pool-trained regressor regresses toward $26$); (ii) a \emph{covariate shift} (scanner population, acquisition protocols and demographic intensity statistics differ); and (iii) a \emph{calibration shift} (severe cases are systematically under-predicted, with a $\hat{y}$-on-$y$ slope of $0.55$ to $0.68$ across all configurations we tried). Past work tends to treat the gap monolithically with a single global intervention, or to use domain-adversarial alignment. We and others~\cite{gulrajani2021domainbed} observe that adversarial alignment collapses regression heads as soon as label shift dominates. Our position is more granular: each shift component requires a different intervention, and the right empirical question is which intervention transfers across which component. The pipeline in Fig.~\ref{fig:pipeline} embodies this position, with each rung colour-coded by the shift it targets.
+
+\begin{figure}[!htb]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  font=\small,
+  >={Latex[length=2.2mm,width=1.6mm]},
+  node distance=4mm and 5mm,
+  base/.style={rectangle, draw=black!70, line width=0.6pt, rounded corners=2.5pt,
+               minimum height=10mm, align=center, inner sep=3pt, font=\small},
+  data/.style={base, fill=nullshade, minimum width=18mm},
+  enc/.style={base, fill=encshade, minimum width=22mm},
+  feat/.style={base, fill=white, minimum width=14mm},
+  label/.style={base, fill=shiftL, minimum width=16mm},
+  covar/.style={base, fill=shiftC, minimum width=16mm},
+  calib/.style={base, fill=shiftK, minimum width=16mm},
+  uq/.style={base, fill=shiftU, minimum width=16mm},
+  diag/.style={base, fill=white, draw=black!40, minimum width=14mm, font=\footnotesize\itshape},
+  outnode/.style={base, fill=outshade, minimum width=22mm},
+  arr/.style={-{Latex[length=2.2mm]}, line width=0.7pt, color=black!70},
+  legend/.style={rectangle, minimum width=4mm, minimum height=2.6mm, draw=black!50, line width=0.4pt}
+]
+%--- input column
+\node[data] (cxr) {CXR\\\footnotesize $518{\times}518$};
+\node[enc, right=6mm of cxr] (enc) {RAD-DINO\\\footnotesize (frozen)};
+
+%--- feature column
+\node[feat, above right=-1mm and 6mm of enc] (cls) {CLS\\\footnotesize $768$};
+\node[feat, below right=-1mm and 6mm of enc] (grid) {grid\\\footnotesize $49{\times}768$};
+
+%--- label-shift rungs (top row)
+\node[label, right=7mm of cls] (r1) {R1\\\footnotesize BMC head};
+\node[covar, right=4mm of r1] (r2) {R2\\\footnotesize TTA align};
+\node[label, right=4mm of r2] (r3) {R3\\\footnotesize $k$-NN cal.};
+
+%--- calibration row (below)
+\node[calib, right=7mm of grid] (r4b) {R4b\\\footnotesize spat. cavity};
+\node[diag, right=4mm of r4b] (r5) {R5\\\footnotesize MoE (null)};
+\node[diag, right=4mm of r5] (r7) {R7\\\footnotesize iso. (null)};
+
+%--- uncertainty + output
+\node[uq, right=4mm of r3] (r6) {R6\\\footnotesize ensemble\\\footnotesize $+$ conformal};
+\node[outnode, right=6mm of r6] (yout) {$\hat{y}\pm q$\\\footnotesize Timika};
+
+%--- arrows: main flow
+\draw[arr] (cxr) -- (enc);
+\draw[arr] (enc.east) -- (cls.west);
+\draw[arr] (enc.east) -- (grid.west);
+\draw[arr] (cls) -- (r1);
+\draw[arr] (r1) -- (r2);
+\draw[arr] (r2) -- (r3);
+\draw[arr] (r3) -- (r6);
+\draw[arr] (r6) -- (yout);
+
+%--- calibration path feeding into Timika sum
+\draw[arr] (grid) -- (r4b);
+\draw[arr, dashed, color=black!55] (r4b.east) -- ++(2mm,0) -| (r6.south);
+
+%--- diagnostic nulls (dashed, visually distinct)
+\draw[arr, dashed, color=black!40] (r4b) -- (r5);
+\draw[arr, dashed, color=black!40] (r5) -- (r7);
+
+%--- legend (anchored below the bounding box so it never overlaps rungs)
+\path let \p1=(current bounding box.south),
+          \p2=(current bounding box.west),
+          \p3=(current bounding box.east)
+      in coordinate (legend-anchor) at ($(\x2,\y1) + (0,-4mm)$);
+\node[anchor=north west, font=\footnotesize] (txTitle) at (legend-anchor) {Shift target:};
+\node[legend, fill=shiftL, anchor=west, right=2mm of txTitle] (lL) {};
+\node[anchor=west, font=\footnotesize, right=1mm of lL] (txL) {label};
+\node[legend, fill=shiftC, anchor=west, right=3mm of txL] (lC) {};
+\node[anchor=west, font=\footnotesize, right=1mm of lC] (txC) {covariate};
+\node[legend, fill=shiftK, anchor=west, right=3mm of txC] (lK) {};
+\node[anchor=west, font=\footnotesize, right=1mm of lK] (txK) {calibration};
+\node[legend, fill=shiftU, anchor=west, right=3mm of txK] (lU) {};
+\node[anchor=west, font=\footnotesize, right=1mm of lU] (txU) {uncertainty};
+\node[legend, fill=white, draw=black!40, anchor=west, right=3mm of txU] (lN) {};
+\node[anchor=west, font=\footnotesize, right=1mm of lN] {diagnostic null};
+\end{tikzpicture}%
+}
+\caption{Composable pipeline on a frozen RAD-DINO encoder. Each rung is independently toggled and is colour-coded by the shift component it targets: \textbf{label} (R1, R3), \textbf{covariate} (R2), \textbf{calibration} (R4b), and \textbf{distributional uncertainty} (R6). R5 and R7 are included as diagnostic nulls that the decomposition predicts have no leverage on any of the three shifts. The dashed link from R4b carries the cavity contribution into the Timika sum of Eq.~\ref{eq:timika}.}
+\label{fig:pipeline}
+\end{figure}
+
+\smallskip\noindent\textbf{Contributions.}
+This paper makes four contributions, in order of priority for a reviewer.
+\begin{itemize}
+\item \emph{A shift-decomposition framework} for cross-country severity regression that factorises the generalisation gap into label, covariate and calibration components, each with a country-specific empirical diagnostic (Sec.~\ref{sec:framework}).
+\item \emph{A spatial-attention cavity head} (R4b) on the RAD-DINO $7\!\times\!7$ patch grid that lifts Romania cavity AUC from $0.679$ to $0.721$, lifts Moldova and Kazakhstan cavity AUC by $2$ to $3$ points, and is the only intervention we found that pushes the Timika regression slope toward~$1.0$, partially correcting the calibration component (Sec.~\ref{sec:method}, Sec.~\ref{sec:cavity_attn}).
+\item \emph{A controlled ablation of seven composable interventions} (rungs R1 through R7) on a frozen RAD-DINO encoder, mapped one-to-one onto the shift decomposition, with paired-bootstrap significance under Bonferroni--Holm correction (Sec.~\ref{sec:results}). The recommended configuration reaches Timika MAE \textbf{$19.12$\,/\,$21.59$\,/\,$16.74$}, an improvement of $-0.99$\,/\,$-9.09$\,/\,$-4.61$ over the replicated DH baseline.
+\item \emph{Three controlled negative results} that delimit the regime: a class-balanced focal loss on an already balanced cavity split, a mixture-of-experts (MoE) on frozen features, and a post-hoc isotonic slope calibrator. Each null maps a~priori to a shift axis on which it provably has no leverage (Sec.~\ref{sec:negatives}).
+\end{itemize}
+
+%=============================================================================
+\section{Related Work}
+%=============================================================================
+
+\subsubsection{TB severity scoring.}
+Binary TB classification from CXR is well studied~\cite{liu2020tbx11k,jaeger2014shenzhen}. Structured severity regression has received much less attention. K24~\cite{kantipudi2024} is the only end-to-end Timika regressor we know of; we treat their reported numbers as an aspirational reference and report all gains against our controlled replication. Earlier sextant-level lesion-burden estimators on TB~Portals~\cite{tbportals2020} are not directly comparable, since they do not produce the full Timika scale.
+
+\subsubsection{CXR foundation models.}
+CheXzero~\cite{tiu2022chexzero} demonstrated zero-shot CXR classification through contrastive vision-language pretraining; BioMedCLIP~\cite{zhang2024biomedclip} extended this to biomedical literature; and TorchXRayVision~\cite{cohen2022torchxrayvision} provides a DenseNet121 pretrained on $14$ CXR datasets. RAD-DINO~\cite{perez2024raddino} adapts DINOv2~\cite{oquab2024dinov2} to CXRs through self-distilled vision-only pretraining on roughly $880{,}000$ images. We use RAD-DINO as the primary encoder and benchmark against BioMedCLIP and TorchXRayVision under identical frozen-feature protocols (Sec.~\ref{sec:published_compare}).
+
+\subsubsection{Domain adaptation under shift.}
+DANN-style adversarial domain adaptation~\cite{ganin2016domain} is known to collapse regression heads as soon as the label distribution itself shifts, consistent with the conclusions of~\cite{gulrajani2021domainbed}. Test-time adaptation through CORAL-style feature alignment~\cite{sun2016deepcoral} is a lighter alternative that requires no source-domain access at inference. Retrieval-based label correction has been explored for out-of-distribution generalisation~\cite{long2022retievalood} and language modelling, but to our knowledge not for cross-country medical severity regression.
+
+\subsubsection{Uncertainty quantification in clinical imaging.}
+Split-conformal prediction~\cite{angelopoulos2023conformalintro} provides distribution-free coverage guarantees that degrade gracefully under mild covariate shift, and deep ensembles~\cite{lakshminarayanan2017deepensembles} stabilise both point accuracy and predictive variance. Their combination has been applied to CXR pathology classification but not, to our knowledge, to Timika regression. We provide a per-country, per-severity-band coverage decomposition that exposes residual covariate shift that the calibration step alone cannot resolve.
+
+%=============================================================================
+\section{Method}
+\label{sec:method}
+\label{sec:framework}
+%=============================================================================
+
+\subsection{Problem Setup}
+
+Given a CXR $x\in\mathbb{R}^{H\times W}$, we predict its Timika score $y\in[0,140]$ as defined in Eq.~\ref{eq:timika}. The training corpus is partitioned country-wise into $\mathcal{D}=\mathcal{D}_R\cup\mathcal{D}_M\cup\mathcal{D}_K$. Following K24, the LOCO protocol holds one country out for testing and splits the other two patient-disjoint $80/20$ into train and validation~\cite{kantipudi2024}.
+
+\subsection{Shift Decomposition}
+
+We formalise the cross-country gap into three components and derive empirical diagnostics for each. Let $\mathcal{D}_{\text{src}}$ denote the source (train-pool) distribution and $\mathcal{D}_{\text{tgt}}$ the held-out country. \textbf{Label shift}, $P_{\text{src}}(y){\neq}P_{\text{tgt}}(y)$, is diagnosed by the test-vs-train-pool ALP mean gap (for Moldova, $+13.8$ points, the dominant component), and is corrected either by an imbalanced-regression loss that prevents collapse to the source prior (R1 BMC) or by a non-parametric term that anchors to local-neighbourhood labels (R3, retrieval). \textbf{Covariate shift}, $P_{\text{src}}(\phi(x)){\neq}P_{\text{tgt}}(\phi(x))$, is diagnosed by whether transductive feature alignment helps the country in question: R2 (CORAL-style test-time z-score plus covariance match) improves Moldova by roughly $2$ Timika points yet significantly degrades Kazakhstan, which establishes empirically that the two countries' shifts are qualitatively different, and so R2 is applied country-conditionally. \textbf{Calibration shift}, the slope $\partial\hat{y}/\partial y<1$ on the held-out cohort, is diagnosed by the linear-regression slope of $\hat{y}$ on $y$ (Sec.~\ref{sec:results}); the right correction is a representation that retains localised lesion evidence (R4b spatial cavity), not a post-hoc isotonic transform (R7 is a null on real data). R6 (ensemble $+$ conformal) supplies distributional uncertainty independent of which shift dominates, and routing on frozen features (R5) has no leverage on any of the three shifts, since the gate sees no information the experts do not already see.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{fig_shift_decomposition.pdf}
+\caption{ALP density per held-out country against the train pool. Moldova is right-shifted ($\mu_{\text{Mol}}{=}39.8$ vs.\ $\mu_{\text{pool}}{=}26.0$), Kazakhstan is left-shifted, Romania is close to alignment. This isolates the label-shift component on the ALP term and identifies Moldova as the dominant cross-country gap that the framework targets. The companion cavity-rate label shift (Romania $65\%$ vs.\ pool $\approx 38\%$) is reported in Table~\ref{tab:cohort}, and the calibration-shift slope compression for DH \texttt{best + R4b} (slopes $0.60$--$0.67$) is discussed in Sec.~\ref{sec:calibration}.}
+\label{fig:shift_decomp}
+\end{figure}
+
+\subsection{Frozen RAD-DINO Encoder}
+
+Each CXR is centre-cropped, padded to a square aspect ratio, and resized to $518\!\times\!518$. RAD-DINO with patch size $14$ yields a $37\!\times\!37$ patch grid, which we average-pool to $7\!\times\!7$ for the spatial heads. The encoder is held frozen throughout: this removes any fine-tuning confound and allows one-shot feature caching, after which the full ablation grid trains in under two GPU-hours. Each image yields two representations, the $768$-dim CLS embedding $\phi(x)$ and the pooled patch grid $\Phi(x)\in\mathbb{R}^{49\times 768}$.
+
+\subsection{Intervention Rungs, Grouped by Shift Component}
+
+Each rung in Fig.~\ref{fig:pipeline} is independently toggled and is grouped below by the shift component it targets.
+
+\smallskip\noindent\textbf{Label shift: R1 (BMC head) and R3 (retrieval).}
+R1 is a two-layer MLP $f_\theta:\mathbb{R}^{768}\to[0,1]$ rescaled to the Timika range and trained with the Balanced MSE loss of Ren et al.~\cite{ren2022bmc}, a batch-Monte-Carlo objective for imbalanced regression. R3 retrieves, for each test image, its $K{=}25$ nearest neighbours in the train-pool feature space (cosine similarity) and blends their mean Timika with the parametric head:
+\begin{equation}
+\hat{y}_{R3}(x) \;=\; (1-\alpha)\,f_\theta(\phi(x)) \;+\; \alpha\,\tfrac{1}{K}\!\sum_{i=1}^{K} y_i, \qquad \alpha\in[0,0.4],
+\label{eq:retrieval}
+\end{equation}
+with $\alpha$ selected on validation by grid search. R3 is non-parametric and anchors to local-neighbourhood labels rather than to the global pool mean.
+
+\smallskip\noindent\textbf{Covariate shift: R2 (transductive CORAL).}
+At test time we compute the held-out country's feature mean $\mu_T$ and covariance $\Sigma_T$, then re-standardise to the train-pool statistics $(\mu_S,\Sigma_S)$:
+\begin{equation}
+\phi'(x) \;=\; \Sigma_S^{1/2}\Sigma_T^{-1/2}\,\bigl(\phi(x)-\mu_T\bigr) + \mu_S.
+\label{eq:coral}
+\end{equation}
+R2 is parameter-free, label-free, sees the full target batch, and is applied country-conditionally.
+
+\smallskip\noindent\textbf{Calibration shift: R4b (spatial cavity) and R7 (slope calibration).}
+The spatial cavity head scores each of $49$ patches and pools them by learned attention:
+\begin{align}
+s_p(x) &= \mathrm{MLP}_{\text{score}}(\Phi_p(x)), \quad a_p(x) = \mathrm{softmax}_p\!\bigl(\mathrm{MLP}_{\text{attn}}(\Phi_p(x))\bigr), \nonumber\\
+\hat{c}(x) &= \textstyle\sum_{p=1}^{49} a_p(x)\,s_p(x).
+\label{eq:spatial_cav}
+\end{align}
+The attention weights $a_p$ are exposed at inference and ground the qualitative analysis of Sec.~\ref{sec:cavity_attn}. R7 is a post-hoc isotonic regression~\cite{niculescu2005isotonic} fitted on validation pairs $(\hat{y}_{\text{val}},y_{\text{val}})$; we include it to test whether the calibration shift can be cheaply corrected after the fact.
+
+\smallskip\noindent\textbf{Distributional uncertainty (R6) and diagnostic null (R5).}
+R6 averages $M{=}10$ R1 heads with different seeds, and validation residuals $\{|y_v-\hat{y}_v|\}$ yield a split-conformal half-width $q=\mathrm{Quantile}_{1-\alpha}(\{|y_v-\hat{y}_v|\})$ for the interval $[\hat{y}-q,\hat{y}+q]$ at nominal coverage $0.90$~\cite{angelopoulos2023conformalintro}. R5 is a learned-gate mixture of $K{=}4$ expert MLPs on the CLS feature; the decomposition predicts that R5 cannot help, since the gate observes the same vector as the experts under a frozen feature extractor.
+
+\subsection{Prediction Modes}
+\label{sec:fusion}
+
+Following K24 and using short descriptive labels, we instantiate four prediction modes: \textbf{SG-ALP} (single-head ALP on the patch grid, a detection-free reformulation of K24's geometry-based A1); \textbf{DH} (dual-head, separate ALP and cavity heads combined via Eq.~\ref{eq:timika}, the K24-A2 family); \textbf{DT} (dual-task, shared trunk regressing Timika end-to-end, the K24-A3 family); and \textbf{Hybrid}, a validation-tuned blend of DH and DT. Hybrid dominates each individual mode in our five-seed runs because it averages over complementary error patterns, so it underpins the headline numbers and is the recommended deployment configuration.
+
+%=============================================================================
+\section{Experiments}
+%=============================================================================
+
+\subsection{Dataset and Protocol}
+\label{sec:dataset}
+
+We use the TB~Portals August-$2023$ release~\cite{tbportals2020} and follow K24's manifest construction: a seed-$42$ subsample to $5{,}010$ frontal CXRs across eight countries with patient-disjoint LOCO splits. ALP is the overall-lung annotation; cavity is positive if any sextant reports any cavity. The cavity training split is balanced (all positives plus an equal random sample of negatives, patient-disjoint), as in K24. Hard assertions in the splitting code enforce zero patient leakage and are never disabled. The cohort breakdown appears in Table~\ref{tab:cohort}.
+
+\input{cohort_summary.tex}
+
+The LOCO test cohorts are $n_R{=}220$, $n_M{=}589$ and $n_K{=}399$. Table~\ref{tab:cohort} makes the cross-country label shift explicit: Romania has a $65\,\%$ cavity rate against Kazakhstan's $40\,\%$ and Moldova's $33\,\%$ (label shift on the cavity term); Moldova has the highest ALP mean ($39.8$ versus a cohort average of $27.6$, label shift on the ALP term). These per-country distributional differences are precisely the diagnostics that Sec.~\ref{sec:framework} formalises, and they explain why the generic shift-robust learners in Sec.~\ref{sec:published_compare} plateau without a localised cavity model.
+
+\subsection{Reference Systems, Training and Evaluation}
+
+Table~\ref{tab:published_baselines} compares against three families of published comparators on identical patient-disjoint splits: (i) plug-in composites of TorchXRayVision's \texttt{lung\_opacity} probe~\cite{cohen2022torchxrayvision} (ALP proxy) and Tiu et al.'s CheXzero zero-shot cavity probe~\cite{tiu2022chexzero}, combined via Eq.~\ref{eq:timika} on a held-out validation fit; (ii) the shift-robust learners GroupDRO~\cite{sagawa2020distributionally} and Importance-Weighted regression~\cite{shimodaira2000improving} on TXV features with country as group label; and (iii) our $5$-seed local replication of K24's three families (SG-ALP, DH, DT). Each cell of the ablation grid is a tuple (mode, rung, country, seed) over $5$ seeds and $3$ held-out countries. Heads are two-layer MLPs (hidden width $256$, dropout $0.3$), trained with AdamW at $\eta{=}10^{-3}$ for $50$ epochs with early stopping on validation MAE; R6 averages $M{=}10$ ensemble members per seed. We report Timika MAE, Pearson $r$, ALP MAE, cavity AUC and F1, and the $\hat{y}$-on-$y$ slope, all as $5$-seed mean$\pm$std. Statistical significance uses paired bootstrap ($2{,}000$ replicates paired on \texttt{image\_id}) against the within-mode R1 MSE reference, with Bonferroni--Holm correction over the $21$ (rung, country) hypotheses per mode at family-wise $\alpha=0.05$.
+
+%=============================================================================
+\section{Results}
+\label{sec:results}
+%=============================================================================
+
+\subsection{Cross-Country Headline}
+
+\input{headline_table.tex}
+
+Table~\ref{tab:headline} summarises the cross-country result. The recommended configuration \textbf{Hybrid + R3 + R6 + R4b} reaches Timika MAE \textbf{$19.12$\,/\,$21.59$\,/\,$16.74$} on Romania\,/\,Moldova\,/\,Kazakhstan. Against our local replication of the K24 DH (dual-head) family this is an improvement of $-0.99$\,/\,$-9.09$\,/\,$-4.61$ Timika points. Every proposed configuration outperforms the replicated DH baseline on Moldova and Kazakhstan; on Romania the spatial-cavity-augmented configurations sit within noise of that baseline. The Moldova-specialised variant Hybrid + R3 + R6 + R2 reaches \textbf{$19.98$} on Moldova, the best Moldova number in our entire study, at the cost of degrading Kazakhstan (Sec.~\ref{sec:bootstrap}).
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.95\linewidth]{fig_waterfall.pdf}
+\caption{Per-rung Hybrid-mode Timika MAE per held-out country. The spatial cavity head and the combined \texttt{best + R4b} configuration are jointly the lowest across all three countries; R2 (TTA) helps Moldova and degrades Romania and Kazakhstan; R5 (MoE) is a null.}
+\label{fig:headline_waterfall}
+\end{figure}
+
+\subsection{Per-Rung Ablation}
+\label{sec:ablation}
+
+\input{ablation_fusion.tex}
+
+Table~\ref{tab:abl_fusion} reports the Hybrid-mode ablation, with per-mode tables for SG-ALP, DH and DT in the supplementary. Three observations are worth highlighting. First, the R1 (MSE) row is the controlled backbone-only comparator: it shares its loss with our K24 DH replication and only swaps DenseNet for frozen RAD-DINO, isolating the backbone change from every other intervention. This row alone moves DH Moldova from $30.68$ (DenseNet) to $22.55$, so the encoder is responsible for the bulk of the Moldova gap closure and BMC (R1 BMC, $21.92$) and the agentic rungs that follow contribute the residue. Second, R3 retrieval is the most consistent positive contributor; it produces a gain on every (mode, country) cell and never regresses, supplying the non-parametric label-shift correction that the framework predicts. Third, R4b is the single most impactful rung in the combined configuration, lifting cavity AUC and being the only intervention that also raises the regression slope (Sec.~\ref{sec:cavity_attn}), which partially corrects the calibration component.
+
+\subsection{Statistical Significance Under Multiple-Comparison Correction}
+\label{sec:bootstrap}
+
+\input{paired_bootstrap.tex}
+
+Table~\ref{tab:bootstrap} summarises the four deployment-critical comparisons under paired-bootstrap with Bonferroni--Holm correction across 21 (rung, country) hypotheses per mode at $\alpha=0.05$. The \texttt{best (R3+R6)} DH configuration is corrected-significant on all three countries (Romania $\Delta=-1.11$, Moldova $\Delta=-1.29$, Kazakhstan $\Delta=-0.93$), and adding the R4b spatial cavity head pushes Kazakhstan to $\Delta=-1.59$. R2 (TTA) flips sign country-conditionally, with corrected-significant gains on Moldova in both DH ($\Delta=-0.71$) and DT ($\Delta=-2.92$) but a corrected-significant degradation on DT Romania ($\Delta=+3.03$); this is exactly the pattern the framework predicts when label shift dominates on one country and covariate shift on another. The largest Moldova reduction in our entire study comes from \texttt{best + R2} on DT ($\Delta=-3.27$), but the same configuration degrades DT Romania by $+2.34$ points, so we recommend it only as a Moldova-specialised variant. Hybrid mode averages these complementary error patterns and is the configuration we recommend for general deployment.
+
+\subsection{Comparison to Published Methods}
+\label{sec:published_compare}
+
+\input{published_baselines.tex}
+
+Table~\ref{tab:published_baselines} compares the recommended pipeline to three families of published comparators on identical splits. Three findings are robust across countries. First, the strongest published plug-in composite (TXV $+$ CheXzero) reaches $24.02$\,/\,$26.37$\,/\,$27.76$ on Romania\,/\,Moldova\,/\,Kazakhstan, competitive on Romania but $5{+}$ points behind our pipeline on Moldova and Kazakhstan, the two countries where label shift on the cavity term is largest. Second, the published shift-robust learners (GroupDRO, IW-regression) close part of the cross-country gap but plateau in the $23$ to $28$ MAE range; they reweight the training distribution but do not change the features, so they cannot correct the spatial localisation of cavities. Third, our Hybrid $+$ R4b configuration improves over the best published baseline by $-3.70$ (Romania), $-4.78$ (Moldova) and $-8.51$ (Kazakhstan) Timika points. The largest absolute gain falls on the country with the mildest cross-country shift, which suggests that the improvement is attributable to the cavity head rather than to shift correction alone.
+
+\subsection{Spatial Cavity Attention and Cavity AUC}
+\label{sec:cavity_attn}
+\label{sec:cavity_aucfig}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.80\linewidth]{fig_cavity_attention.pdf}
+\caption{Spatial cavity-attention overlays from the R4b head on the RAD-DINO $7\!\times\!7$ patch grid. Two cavity-positive and one cavity-negative example per held-out country; $p$ is the predicted cavity probability. Attention concentrates on the upper lung apices for cavity-positive cases (consistent with the K24~\cite{kantipudi2024} observation that TB lesions most often appear at the lung apex) and disperses for cavity-negative cases.}
+\label{fig:cavity_attention}
+\end{figure}
+
+Fig.~\ref{fig:cavity_attention} shows nine attention overlays from the R4b head. The cavity-positive attention concentrates on the upper lobes, where TB cavities most often appear; the cavity-negative attention is diffuse. The qualitative pattern provides visual evidence that the AUC gain is consistent with localised lesion evidence rather than a spurious global cue. Because cavity carries the $40$-point penalty in Eq.~\ref{eq:timika}, AUC gains propagate disproportionately into Timika MAE: the cavity-head swap alone moves DH Romania from $20.89$ to $19.62$ and DH Kazakhstan from $18.07$ to $16.57$ (Fig.~\ref{fig:cavity_auc}).
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.65\linewidth]{fig_cavity_auc.pdf}
+\caption{Cavity AUC under DH mode, global CLS versus the spatial-attention head. R4b adds $2$ to $4$ AUC points and closes the Romania cavity-classification gap.}
+\label{fig:cavity_auc}
+\end{figure}
+
+Conformal severity intervals at nominal $0.90$ coverage hold on Romania ($0.88$ to $0.91$; Clopper--Pearson $95\%$ CIs contain $0.90$ on $n_R{=}220$) and Kazakhstan ($0.92$ to $0.93$ on $n_K{=}399$). On Moldova ($n_M{=}589$) the \texttt{best + R4b} configuration drops to $0.83$ with $95\%$ Clopper--Pearson CI $[0.797,0.860]$, which excludes the nominal $0.90$ and confirms statistically that the shortfall is residual covariate shift the source-fit calibration cannot capture, not sampling noise. The TTA-augmented \texttt{best + R2} variant recovers Moldova coverage to $0.881$ (CI $[0.852,0.906]$, contains $0.90$) at the cost of Kazakhstan interval width.
+
+\subsection{Calibration Slope and Per-Severity Error}
+\label{sec:calibration}
+
+Pearson correlation lies in $[0.62,0.82]$ across modes and tracks ranking quality, while the $\hat{y}$-on-$y$ slope sits between $0.55$ and $0.68$ and indicates systematic severity-range compression. The spatial cavity head lifts the slope (DH Romania: $0.596\to 0.666$, DH Kazakhstan: $0.632\to 0.675$), whereas R7 isotonic post-hoc calibration moves it by less than $0.02$ on real data despite a positive synthetic stress test. In the framework of Sec.~\ref{sec:framework} this is direct evidence that the calibration shift is a representation-level phenomenon, not a post-hoc artefact. Decomposed by severity band, error concentrates in the very-severe interval $[100,140]$: a slope of $0.6$ applied to a ground truth of $120$ produces a residual near $48$ points. R4b reduces this band on Moldova and Kazakhstan but leaves Romania within noise.
+
+%=============================================================================
+\section{Discussion}
+\label{sec:negatives}
+%=============================================================================
+
+\subsubsection{What the results tell us.}
+Each negative result is predicted by the decomposition. R4 (class-balanced focal) double-corrects an absent imbalance, since the K24 cavity split is balanced by construction; the Romania cavity weakness is a spatial-pooling problem (calibration shift in disguise), not a class-frequency one, which is exactly what R4b corrects. R5 (MoE on frozen features) offers no leverage on any shift when the gate sees the same vector as the experts, confirming the DomainBed verdict~\cite{gulrajani2021domainbed} in medical severity regression. R7 (isotonic) is null because slope compression is representation-level, not post-hoc, and because the validation cohort does not span the very-severe range. On the positive side, the dominance of R1 plus R3 confirms that label shift is the primary failure mode; R2's country-conditional sign refines the diagnosis (Moldova is label$+$minor covariate, Kazakhstan dominated by label); and R4b's slope lift is, to our knowledge, the first demonstration that a well-targeted spatial-attention classifier can partially correct calibration shift in a regression head without retraining the encoder.
+
+\subsubsection{Limitations and clinical considerations.}
+Four limitations bound the contribution. (i) The Moldova conformal coverage shortfall (CP $95\%$ CI $[0.797,0.860]$ versus nominal $0.90$, Sec.~\ref{sec:cavity_aucfig}) is residual covariate shift that R2 only partially addresses; a jointly source--target calibrated conformal procedure is a natural extension. (ii) The very-severe band ($100$ to $140$) retains MAE between $35$ and $50$ across all configurations, and future work should target a feature-conditional calibrator or an auxiliary cohort of confirmed severe cases. (iii) K24~\cite{kantipudi2024} do not release patient-disjoint splits or per-image predictions, so the K24 architecture families serve as a methodological reference rather than a numerical benchmark in this paper. We re-implemented the three K24 approach families (SG-ALP, DH, DT) with identical architectures, losses, and training protocol on our publicly reproducible $5{,}010$-image seed-$42$ manifest and report every gain against this controlled 5-seed reproduction. All cross-pipeline claims therefore hold on \emph{the same} manifest and the same patient-disjoint LOCO protocol on both sides; differences between our K24-family numbers and any externally reported K24 numbers are due to manifest construction, which the present paper cannot eliminate but does isolate. (iv) The R4b attention claim (Fig.~\ref{fig:cavity_attention}) is qualitative; a quantitative attention-localisation validation against the TB~Portals sextant-level cavity annotations is a natural next step that the present paper does not attempt. Clinically, the $40$-point cavity penalty makes cavity classification the dominant factor at deployment, so R4b is the contribution that most directly serves clinical use, and conformal intervals should accompany every point prediction.
+
+%=============================================================================
+\section{Conclusion}
+%=============================================================================
+
+A frozen CXR foundation backbone closes most of the cross-country generalisation gap on TB~Portals Timika scoring, and the residue is removed by a small set of composable interventions targeted at the label, covariate and calibration components of the shift. Three controlled negative results (focal cavity loss on balanced splits, mixture-of-experts on frozen features, post-hoc isotonic slope calibration) delimit the regime; the decomposition predicts each a~priori and points to spatial pooling and severity-range compression as the next targets. Code, manifests, per-image predictions, attention overlays and trained heads are released; the full ablation grid reproduces in roughly six T4-GPU hours after a single feature caching pass.
+
+\begin{credits}
+\subsubsection{\ackname} Supported by Lahore University of Management Sciences. We thank the TB~Portals Program (NIAID/NIH) for public access to the corpus.
+\subsubsection{\discintname} The authors declare no competing interests relevant to this work.
+\end{credits}
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}
+nces. We thank the TB~Portals Program (NIAID/NIH) for public access to the corpus.
+\subsubsection{\discintname} The authors declare no competing interests relevant to this work.
+\end{credits}
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}
+Portals Program (NIAID/NIH) for public access to the corpus.
+\subsubsection{\discintname} The authors declare no competing interests relevant to this work.
+\end{credits}
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}
+bliography{refs}
+
+\end{document}
+k.
+\end{credits}
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}

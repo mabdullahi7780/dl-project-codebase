@@ -1,0 +1,23 @@
+\begin{table}[t]
+\centering\small
+\caption{SG-ALP mode per-rung ablation: Timika MAE (mean$\pm$std, 5 seeds). Bold = best in column.}
+\label{tab:abl_a1}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c c c}
+\toprule
+Configuration & Romania & Moldova & Kazakhstan \\
+\midrule
+R1 (MSE) & 20.09$\pm$0.74 & 22.36$\pm$2.11 & 19.22$\pm$0.96 \\
+R1 (BMC) & 20.34$\pm$0.84 & 23.09$\pm$2.89 & 18.96$\pm$0.93 \\
++R2 TTA & -- & -- & -- \\
++R3 retrieval & 20.16$\pm$0.74 & 22.94$\pm$2.35 & 19.14$\pm$0.69 \\
++R4b spat-cav & 19.98$\pm$0.60 & 21.40$\pm$1.79 & \textbf{17.81$\pm$0.52} \\
++R5 sev-MoE & -- & -- & -- \\
++R6 conf+ens & 20.11$\pm$0.73 & 22.49$\pm$2.36 & 18.97$\pm$0.90 \\
++R7 isotonic & 20.23$\pm$0.67 & 21.82$\pm$1.51 & 19.00$\pm$0.79 \\
+\textit{best (R3+R6)} & 20.04$\pm$0.79 & 22.46$\pm$2.08 & 19.09$\pm$0.77 \\
+\textit{best+spat-cav} & \textbf{19.65$\pm$0.33} & \textbf{21.05$\pm$0.89} & 17.89$\pm$0.44 \\
+\textit{best+TTA} & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}

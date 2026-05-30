@@ -1,0 +1,37 @@
+\begin{table}[!htb]
+\centering
+\caption{Paired-bootstrap $\Delta$-Timika MAE versus the R1 (MSE) reference, computed on 2{,}000 replicates paired on \texttt{image\_id}, under the DH and DT prediction modes. Negative $\Delta$ favours the rung; 95\,\% CIs that exclude zero are marked $\ast$ and remain significant after Bonferroni--Holm correction across the family of 21 (rung, country) hypotheses at $\alpha=0.05$. The country-conditional sign of R2 (TTA) and the consistently negative sign of R3 are visible at a glance.}
+\label{tab:bootstrap}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l l l r r c}
+\toprule
+Mode & Country & Configuration & $\Delta$MAE & 95\,\% CI & sig \\
+\midrule
+\multicolumn{6}{l}{\textit{DH mode}} \\
+DH & Romania    & R3 retrieval         & $+0.06$ & $[-0.28,\,+0.42]$ &  \\
+DH & Romania    & R4b spatial cavity    & $-0.93$ & $[-2.29,\,+0.46]$ &  \\
+DH & Romania    & R6 conformal          & $+0.39$ & $[+0.09,\,+0.67]$ & $\ast$ \\
+DH & Romania    & best (R3$+$R6)        & $-1.11$ & $[-1.77,\,-0.46]$ & $\ast$ \\
+DH & Romania    & best $+$ R4b          & $-1.05$ & $[-2.40,\,+0.29]$ &  \\
+DH & Moldova    & R3 retrieval          & $-0.25$ & $[-0.48,\,-0.02]$ & $\ast$ \\
+DH & Moldova    & R2 TTA                & $-0.71$ & $[-1.33,\,-0.08]$ & $\ast$ \\
+DH & Moldova    & best (R3$+$R6)        & $-1.29$ & $[-1.67,\,-0.94]$ & $\ast$ \\
+DH & Moldova    & best $+$ R2           & $-1.17$ & $[-1.69,\,-0.59]$ & $\ast$ \\
+DH & Kazakhstan & R3 retrieval          & $-0.50$ & $[-0.78,\,-0.22]$ & $\ast$ \\
+DH & Kazakhstan & R2 TTA                & $+1.28$ & $[+0.43,\,+2.12]$ & $\ast$ \\
+DH & Kazakhstan & R4b spatial cavity    & $-1.32$ & $[-2.31,\,-0.35]$ & $\ast$ \\
+DH & Kazakhstan & best $+$ R4b          & $-1.59$ & $[-2.53,\,-0.66]$ & $\ast$ \\
+\midrule
+\multicolumn{6}{l}{\textit{DT mode (amplifies the country-conditional pattern)}} \\
+DT & Romania    & R2 TTA                & $+3.03$ & $[+1.01,\,+5.10]$ & $\ast$ \\
+DT & Romania    & best $+$ R2           & $+2.34$ & $[+0.75,\,+4.00]$ & $\ast$ \\
+DT & Moldova    & R3 retrieval          & $-1.48$ & $[-1.86,\,-1.11]$ & $\ast$ \\
+DT & Moldova    & R2 TTA                & $-2.92$ & $[-3.74,\,-2.03]$ & $\ast$ \\
+DT & Moldova    & best $+$ R2           & $-3.27$ & $[-3.96,\,-2.55]$ & $\ast$ \\
+DT & Kazakhstan & R3 retrieval          & $-2.16$ & $[-2.79,\,-1.49]$ & $\ast$ \\
+DT & Kazakhstan & R6 conformal          & $-2.62$ & $[-3.40,\,-1.89]$ & $\ast$ \\
+DT & Kazakhstan & best (R3$+$R6)        & $-1.83$ & $[-2.63,\,-1.08]$ & $\ast$ \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,26 @@
+\begin{table}[!htb]
+\centering
+\caption{Cross-country Timika MAE on the patient-disjoint LOCO splits. Numbers are 5-seed mean$\pm$std. The reference block reports our local replication of the three K24~\cite{kantipudi2024} architecture families; the proposed block reports the single agentic configuration we recommend for deployment, plus its Moldova-specialised variant. Bold marks the best in column.}
+\label{tab:headline}
+\setlength{\tabcolsep}{4pt}
+\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l l c c c c}
+\toprule
+Family & Configuration & Romania & Moldova & Kazakhstan & Mean \\
+\midrule
+\multicolumn{6}{l}{\textit{Reference: K24~\cite{kantipudi2024} architecture family, local 5-seed replication$^{\ast}$}} \\
+SG-ALP & Single-head ALP (K24-A1)               & 26.84 & 32.76 & 21.87 & 27.16 \\
+DH     & Dual-head        (K24-A2)              & 20.11 & 30.68 & 21.35 & 24.05 \\
+DT     & Dual-task        (K24-A3)              & 20.26 & 26.16 & 21.90 & 22.77 \\
+\midrule
+\multicolumn{6}{l}{\textit{Proposed: agentic ladder on a frozen RAD-DINO encoder}} \\
+Hybrid & best (R3+R6)                           & 19.76$\pm$0.40 & 21.91$\pm$0.46 & 17.28$\pm$0.62 & 19.65 \\
+Hybrid & \textbf{best + R4b (deployment)}       & \textbf{19.12$\pm$0.49} & 21.59$\pm$0.60 & \textbf{16.74$\pm$0.29} & \textbf{19.15} \\
+Hybrid & best + R2 (Moldova variant)            & 20.22$\pm$0.62 & \textbf{19.98$\pm$0.26} & 18.84$\pm$0.57 & 19.68 \\
+\bottomrule
+\end{tabular}%
+}
+\\[3pt]
+{\footnotesize $^{\ast}$K24 do not release patient-disjoint splits. The reference block lists our 5-seed local reproduction of K24's three architecture families on the publicly reproducible manifest of Sec.~\ref{sec:dataset}, not K24's published values. R3 = retrieval calibration, R6 = ensemble + conformal, R4b = spatial cavity head, R2 = test-time feature alignment.}
+\end{table}

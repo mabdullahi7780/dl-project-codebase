@@ -248,12 +248,10 @@ def fig_waterfall(df: pd.DataFrame) -> None:
         vals = [df[(df["mode"]=="fusion")&(df["rung"]==r)&(df["held_out"]==c)]["timika_mae"].mean()
                 for r,_ in rung_order]
         ax.bar(x + (i-1)*width, vals, width, label=c, color=colors[c], edgecolor="black", linewidth=0.3)
-    ax.axhline(KANTIPUDI["Romania"], color="#888", linestyle=":", linewidth=0.7, label="Kantipudi Rom (18.70)")
-    ax.axhline(KANTIPUDI["Moldova"], color="#c44e52", linestyle=":", linewidth=0.5, alpha=0.4)
     ax.set_xticks(x); ax.set_xticklabels([n for _,n in rung_order], rotation=30, ha="right", fontsize=7.5)
-    ax.set_ylabel("Timika MAE (Fusion mode)")
+    ax.set_ylabel("Timika MAE (Hybrid mode)")
     ax.set_ylim(15, 25)
-    ax.legend(loc="upper right", ncol=2, frameon=False, fontsize=7)
+    ax.legend(loc="upper right", ncol=3, frameon=False, fontsize=7.5)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     plt.tight_layout()
     out = FIG_DIR / "fig_waterfall.pdf"
@@ -405,7 +403,7 @@ def fig_reliability(df: pd.DataFrame) -> None:
     ax.set_xticks(x); ax.set_xticklabels(COUNTRIES)
     ax.set_ylabel("Cavity AUC")
     ax.set_ylim(0.6, 0.95)
-    ax.set_title("Cavity head: global CLS vs. spatial attention (A2)")
+    ax.set_title("Cavity head: global CLS vs. spatial attention (DH)")
     ax.legend(frameon=False, fontsize=8)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     plt.tight_layout()

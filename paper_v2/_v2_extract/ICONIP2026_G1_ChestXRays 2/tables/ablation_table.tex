@@ -1,0 +1,27 @@
+\begin{table}[t]
+\centering
+\caption{Per-rung ablation: Timika MAE (mean$\pm$std across 5 seeds). R5 is included to document an honest \emph{null} result; R2 helps Moldova specifically (covariate shift) and hurts Romania/Kazakhstan, so it appears in `best+TTA' rather than in `best'.}
+\label{tab:ablation}
+\setlength{\tabcolsep}{3pt}
+\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l  c c c  c c c  c c c  c c c }
+\toprule
+Configuration & \multicolumn{3}{c}{A1} & \multicolumn{3}{c}{A2} & \multicolumn{3}{c}{A3} & \multicolumn{3}{c}{Fusion} \\
+  & Rom & Mol & Kaz & Rom & Mol & Kaz & Rom & Mol & Kaz & Rom & Mol & Kaz \\
+\midrule
+R1 (MSE) & 20.09\scriptsize$\pm$0.74 & 22.36\scriptsize$\pm$2.11 & 19.22\scriptsize$\pm$0.96 & 20.89\scriptsize$\pm$1.36 & 22.28\scriptsize$\pm$0.50 & 18.07\scriptsize$\pm$1.11 & 21.54\scriptsize$\pm$3.48 & 24.19\scriptsize$\pm$0.89 & 20.76\scriptsize$\pm$0.46 & 19.83\scriptsize$\pm$1.04 & 22.55\scriptsize$\pm$0.76 & 18.52\scriptsize$\pm$0.84 \\
+R1 (BMC) & 20.34\scriptsize$\pm$0.84 & 23.09\scriptsize$\pm$2.89 & 18.96\scriptsize$\pm$0.93 & 21.19\scriptsize$\pm$0.97 & 22.52\scriptsize$\pm$0.66 & 17.81\scriptsize$\pm$0.99 & 21.07\scriptsize$\pm$0.50 & 23.74\scriptsize$\pm$1.45 & 18.46\scriptsize$\pm$0.33 & 20.07\scriptsize$\pm$0.22 & 21.92\scriptsize$\pm$0.59 & 17.32\scriptsize$\pm$0.60 \\
++R2 TTA & -- & -- & -- & 21.03\scriptsize$\pm$0.59 & 21.56\scriptsize$\pm$1.13 & 19.59\scriptsize$\pm$1.27 & 23.10\scriptsize$\pm$0.76 & 21.20\scriptsize$\pm$0.52 & 20.60\scriptsize$\pm$0.43 & 20.85\scriptsize$\pm$0.31 & 20.39\scriptsize$\pm$0.24 & 19.27\scriptsize$\pm$0.61 \\
++R3 retrieval & 20.16\scriptsize$\pm$0.74 & 22.94\scriptsize$\pm$2.35 & 19.14\scriptsize$\pm$0.69 & 20.85\scriptsize$\pm$0.82 & 21.93\scriptsize$\pm$0.53 & 17.51\scriptsize$\pm$1.15 & 20.20\scriptsize$\pm$0.65 & 22.36\scriptsize$\pm$1.09 & 18.69\scriptsize$\pm$0.41 & 19.80\scriptsize$\pm$0.24 & 21.44\scriptsize$\pm$0.54 & 17.39\scriptsize$\pm$0.56 \\
++R4b spat-cav & 19.98\scriptsize$\pm$0.60 & 21.40\scriptsize$\pm$1.79 & 17.81\scriptsize$\pm$0.52 & 20.01\scriptsize$\pm$0.84 & 21.78\scriptsize$\pm$1.11 & 16.99\scriptsize$\pm$0.23 & -- & -- & -- & 19.43\scriptsize$\pm$0.36 & 21.44\scriptsize$\pm$0.67 & 16.79\scriptsize$\pm$0.35 \\
++R5 sev-MoE & -- & -- & -- & 21.96\scriptsize$\pm$1.76 & 22.42\scriptsize$\pm$0.89 & 18.30\scriptsize$\pm$1.04 & 21.68\scriptsize$\pm$0.55 & 25.29\scriptsize$\pm$2.23 & 19.64\scriptsize$\pm$0.87 & 20.37\scriptsize$\pm$0.33 & 22.23\scriptsize$\pm$0.95 & 17.44\scriptsize$\pm$0.88 \\
++R6 conf+ens & 20.11\scriptsize$\pm$0.73 & 22.49\scriptsize$\pm$2.36 & 18.97\scriptsize$\pm$0.90 & 21.02\scriptsize$\pm$0.74 & 22.32\scriptsize$\pm$0.30 & 17.50\scriptsize$\pm$0.94 & 20.51\scriptsize$\pm$0.49 & 24.29\scriptsize$\pm$1.04 & 18.25\scriptsize$\pm$0.14 & 19.88\scriptsize$\pm$0.46 & 22.34\scriptsize$\pm$0.85 & 17.22\scriptsize$\pm$0.64 \\
++R7 isotonic & 20.23\scriptsize$\pm$0.67 & 21.82\scriptsize$\pm$1.51 & 19.00\scriptsize$\pm$0.79 & 20.68\scriptsize$\pm$0.79 & 22.62\scriptsize$\pm$0.29 & 17.93\scriptsize$\pm$1.14 & 21.55\scriptsize$\pm$0.71 & 24.71\scriptsize$\pm$0.80 & 20.23\scriptsize$\pm$0.19 & 19.93\scriptsize$\pm$0.28 & 22.59\scriptsize$\pm$0.41 & 18.09\scriptsize$\pm$0.75 \\
+\textit{best (R3+R6)} & 20.04\scriptsize$\pm$0.79 & 22.46\scriptsize$\pm$2.08 & 19.09\scriptsize$\pm$0.77 & 20.86\scriptsize$\pm$0.72 & 21.87\scriptsize$\pm$0.52 & 17.38\scriptsize$\pm$1.04 & 20.25\scriptsize$\pm$0.41 & 23.15\scriptsize$\pm$0.54 & 18.50\scriptsize$\pm$0.19 & 19.76\scriptsize$\pm$0.40 & 21.91\scriptsize$\pm$0.46 & 17.28\scriptsize$\pm$0.62 \\
+\textit{best+spat-cav} & 19.65\scriptsize$\pm$0.33 & 21.05\scriptsize$\pm$0.89 & 17.89\scriptsize$\pm$0.44 & 19.62\scriptsize$\pm$0.52 & 21.01\scriptsize$\pm$0.41 & 16.57\scriptsize$\pm$0.34 & -- & -- & -- & 19.12\scriptsize$\pm$0.49 & 21.59\scriptsize$\pm$0.60 & 16.74\scriptsize$\pm$0.29 \\
+\textit{best+TTA} & -- & -- & -- & 20.00\scriptsize$\pm$0.68 & 20.77\scriptsize$\pm$1.03 & 18.95\scriptsize$\pm$1.10 & 21.69\scriptsize$\pm$0.37 & 20.45\scriptsize$\pm$0.16 & 19.64\scriptsize$\pm$0.34 & 20.22\scriptsize$\pm$0.62 & 19.98\scriptsize$\pm$0.26 & 18.84\scriptsize$\pm$0.57 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

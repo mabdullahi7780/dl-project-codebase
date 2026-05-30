@@ -1,0 +1,100 @@
+\begin{thebibliography}{10}
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\urlprefix}{URL }
+\providecommand{\doi}[1]{https://doi.org/#1}
+
+\bibitem{angelopoulos2023conformalintro}
+Angelopoulos, A.N., Bates, S.: A gentle introduction to conformal prediction
+  and distribution-free uncertainty quantification. Found. Trends Mach. Learn.
+  \textbf{16}(4),  494--591 (2023)
+
+\bibitem{cohen2022torchxrayvision}
+Cohen, J.P., Viviano, J.D., Bertin, P., et~al.: Torchxrayvision: A library of
+  chest x-ray datasets and models. Proc. MIDL  (2022)
+
+\bibitem{ganin2016domain}
+Ganin, Y., Ustinova, E., Ajakan, H., et~al.: Domain-adversarial training of
+  neural networks. JMLR  \textbf{17}(59),  1--35 (2016)
+
+\bibitem{gulrajani2021domainbed}
+Gulrajani, I., Lopez-Paz, D.: In search of lost domain generalization. In:
+  Proc. ICLR (2021)
+
+\bibitem{jaeger2014shenzhen}
+Jaeger, S., Candemir, S., Antani, S., et~al.: Two public chest x-ray datasets
+  for computer-aided screening of pulmonary diseases. Quant. Imaging Med. Surg.
+   \textbf{4}(6),  475--477 (2014)
+
+\bibitem{kantipudi2024}
+Kantipudi, K., Sriramoju, R., Padma, P., et~al.: Automated pulmonary
+  tuberculosis severity assessment on chest {X}-rays using deep learning. J.
+  Imaging Informatics in Medicine  \textbf{37}(5),  2173--2189 (2024)
+
+\bibitem{lakshminarayanan2017deepensembles}
+Lakshminarayanan, B., Pritzel, A., Blundell, C.: Simple and scalable predictive
+  uncertainty estimation using deep ensembles. In: Proc. NeurIPS (2017)
+
+\bibitem{liu2020tbx11k}
+Liu, Y., Wu, Y., Ban, Y., Wang, H., Cheng, M., et~al.: Rethinking
+  computer-aided tuberculosis diagnosis. Proc. CVPR pp. 2643--2652 (2020)
+
+\bibitem{long2022retievalood}
+Long, A., Yin, W., Ajanthan, T., et~al.: Retrieval augmentation for
+  out-of-distribution generalization. In: Proc. NeurIPS (2022)
+
+\bibitem{niculescu2005isotonic}
+Niculescu-Mizil, A., Caruana, R.: Predicting good probabilities with supervised
+  learning. In: Proc. ICML. pp. 625--632 (2005)
+
+\bibitem{oquab2024dinov2}
+Oquab, M., Darcet, T., Moutakanni, T., et~al.: {DINOv2}: Learning robust visual
+  features without supervision. Transactions on Machine Learning Research
+  (2024)
+
+\bibitem{perez2024raddino}
+P{\'e}rez-Garc{\'i}a, F., Sharma, H., Bond-Taylor, S., et~al.: {RAD-DINO}:
+  Exploring scalable medical image encoders beyond text supervision. arXiv
+  preprint arXiv:2401.10815  (2024)
+
+\bibitem{ralph2010timika}
+Ralph, A.P., Ardian, M., Wiguna, A., et~al.: A simple, valid, numerical score
+  for grading chest x-ray severity in adult smear-positive pulmonary
+  tuberculosis. Thorax  \textbf{65}(10),  863--869 (2010)
+
+\bibitem{ren2022bmc}
+Ren, J., Zhang, M., Yu, C., Liu, Z.: Balanced {MSE} for imbalanced visual
+  regression. In: Proc. CVPR. pp. 7926--7935 (2022)
+
+\bibitem{tbportals2020}
+Rosenthal, A., Gabrielian, A., Engle, E., et~al.: {TB Portals}: an open-access,
+  web-based platform for global drug-resistant tuberculosis data sharing and
+  analysis. Journal of Clinical Microbiology  \textbf{55}(11),  3267--3282
+  (2017)
+
+\bibitem{sagawa2020distributionally}
+Sagawa, S., Koh, P.W., Hashimoto, T.B., Liang, P.: Distributionally robust
+  neural networks for group shifts. In: Proc. ICLR (2020)
+
+\bibitem{shimodaira2000improving}
+Shimodaira, H.: Improving predictive inference under covariate shift by
+  weighting the log-likelihood function. J. Stat. Plan. Inference
+  \textbf{90}(2),  227--244 (2000)
+
+\bibitem{sun2016deepcoral}
+Sun, B., Saenko, K.: {Deep CORAL}: Correlation alignment for deep domain
+  adaptation. In: Proc. ECCV Workshops. pp. 443--450 (2016)
+
+\bibitem{tiu2022chexzero}
+Tiu, E., Talius, E., Patel, P., et~al.: Expert-level detection of pathologies
+  from unannotated chest x-ray images via self-supervised learning. In: Nature
+  Biomedical Engineering (2022)
+
+\bibitem{who2024tb}
+{World Health Organization}: Global tuberculosis report 2024. WHO Press  (2024)
+
+\bibitem{zhang2024biomedclip}
+Zhang, S., Xu, Y., Usuyama, N., et~al.: {BiomedCLIP}: a multimodal biomedical
+  foundation model pretrained from fifteen million scientific image-text pairs.
+  NEJM AI  (2024)
+
+\end{thebibliography}

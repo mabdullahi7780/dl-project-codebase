@@ -1,0 +1,17 @@
+\begin{table}[!htb]
+\centering
+\small
+\caption{Paired-bootstrap $\Delta$-Timika MAE versus the within-mode R1 (MSE) reference (2000 replicates paired on \texttt{image\_id}). Negative $\Delta$ favours the rung. CIs marked $\ast$ remain significant after Bonferroni--Holm correction across the 21 (rung, country) hypotheses per mode at family-wise $\alpha=0.05$. The four rows below are the deployment-critical comparisons; the full grid for all 21 hypotheses per mode is in the supplementary.}
+\label{tab:bootstrap}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l l l r r c}
+\toprule
+Mode & Country & Configuration & $\Delta$MAE & 95\,\% CI & sig \\
+\midrule
+DH & Moldova    & \texttt{best (R3+R6)}        & $-1.29$ & $[-1.67, -0.94]$ & $\ast$ \\
+DH & Kazakhstan & \texttt{best + R4b}          & $-1.59$ & $[-2.53, -0.66]$ & $\ast$ \\
+DT & Moldova    & \texttt{best + R2}           & $-3.27$ & $[-3.96, -2.55]$ & $\ast$ \\
+DT & Romania    & \texttt{best + R2}           & $+2.34$ & $[+0.75, +4.00]$ & $\ast$ \\
+\bottomrule
+\end{tabular}
+\end{table}
