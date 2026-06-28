@@ -1,0 +1,20 @@
+{
+  "country": "Ukraine",
+  "mode": "fusion",
+  "rows": 75,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "ensemble_m": 10,
+  "manifest_sha256": "dda3abfeb079f46c090f9281ffbb11bc46bbdabd7c69420a4a6e817360dde256",
+  "branch": "SyedAbd",
+  "git_commit": "ed66c8e47bf962f347b35fc7dc1a01ffbe127d00",
+  "gpu": "Tesla T4",
+  "torch": "2.10.0+cu128",
+  "transformers": "5.0.0",
+  "created_utc": "2026-06-28T11:12:20.633539+00:00"
+}
