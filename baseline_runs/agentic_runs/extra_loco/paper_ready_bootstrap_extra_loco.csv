@@ -1,0 +1,7 @@
+country,candidate,reference,mae_improvement,ci_lo,ci_hi,p_raw,n_images,n_patients,p_holm
+Georgia,rung4b_spatial_cavity,rung1_mse,0.133392,-0.286236,0.559371,0.529347,1414,1412,0.529347
+Georgia,agentic_best_spatcav,agentic_best,0.346358,0.043316,0.651775,0.025997,1414,1412,0.077992
+Ukraine,rung4b_spatial_cavity,rung1_mse,0.265658,-0.150283,0.674792,0.207979,1316,1306,0.415958
+Ukraine,agentic_best_spatcav,agentic_best,0.491154,0.186203,0.787050,0.001000,1316,1306,0.004000
+Belarus,rung4b_spatial_cavity,rung1_mse,2.217910,1.579719,2.857810,0.000200,1052,798,0.001200
+Belarus,agentic_best_spatcav,agentic_best,0.736304,0.368632,1.098612,0.000400,1052,798,0.002000

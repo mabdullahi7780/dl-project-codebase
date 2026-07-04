@@ -1,0 +1,6 @@
+rung,n_countries,n_images_total,mae_country_macro,mae_image_weighted,pearson_country_macro,pearson_image_weighted
+agentic_best_spatcav,6,4990,19.751044,20.434966,0.722448,0.696135
+rung4b_spatial_cavity,6,4990,19.981367,20.773664,0.717171,0.690621
+agentic_v2_iso,6,4990,20.423844,20.925132,0.701962,0.677130
+rung1_bmc,6,4990,20.491938,21.243190,0.700170,0.675890
+rung1_mse,6,4990,20.958458,21.636346,0.698365,0.675113
