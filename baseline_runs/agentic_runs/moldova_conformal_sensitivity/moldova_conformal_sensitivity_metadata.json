@@ -1,0 +1,15 @@
+{
+  "task": "Moldova conformal coverage sensitivity",
+  "important_note": "Multiplier sweep is diagnostic because multipliers were evaluated using Moldova test residuals. Treat as sensitivity analysis unless a multiplier is fixed a priori or calibrated without target labels.",
+  "best_diagnostic_candidate": "agentic_best_tta with 1.10 interval multiplier",
+  "baseline_rung6_conformal": {
+    "coverage_mean": 0.829,
+    "width_mean": 83.678,
+    "mae_mean": 22.344
+  },
+  "candidate_tta_1_10": {
+    "coverage_mean": 0.914,
+    "width_mean": 90.581,
+    "mae_mean": 19.98
+  }
+}
