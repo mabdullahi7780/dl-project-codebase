@@ -1,4 +1,4 @@
-"""Boundary Critic training (Phase 3 of MoE training).
+ICONIP2026_G1_ChestXRays"""Boundary Critic training (Phase 3 of MoE training).
 
 Trains the ResNet18 boundary critic from Component 7 to predict whether
 a given mask boundary is anatomically plausible.  Positive examples come

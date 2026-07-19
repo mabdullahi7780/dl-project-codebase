@@ -393,6 +393,80 @@ def _aggregate_annotations(ann_df: pd.DataFrame, join_key: str) -> pd.DataFrame:
     return per_image
 
 
+# Sextant (zone) ordering used everywhere in WS-C. Index = column in the 6-dim
+# per-image cavity matrix. The raw CSV spells these out in the ``sextant`` column.
+SEXTANT_ORDER = [
+    "Upper Left Sextant",    # 0
+    "Upper Right Sextant",   # 1
+    "Middle Left Sextant",   # 2
+    "Middle Right Sextant",  # 3
+    "Lower Left Sextant",    # 4
+    "Lower Right Sextant",   # 5
+]
+SEXTANT_TO_IDX = {name: i for i, name in enumerate(SEXTANT_ORDER)}
+# Short codes (patient-anatomy L/R, as the radiologist labels them).
+SEXTANT_CODES = ["UL", "UR", "ML", "MR", "LL", "LR"]
+
+
+def aggregate_sextant_cavities(
+    ann_df: pd.DataFrame, join_key: str = JOIN_KEY,
+) -> pd.DataFrame:
+    """Recover the per-image 6-dim sextant cavity matrix (WS-C, D2).
+
+    This is the spatial-preserving sibling of :func:`_aggregate_annotations`,
+    which collapses every sextant with ``.any()``. Here we *keep* the location:
+    for each ``(imagingstudy_id, sextant)`` a zone is cavity-positive iff any
+    rater's row has a positive count in ``small/medium/largecavities``.
+
+    Returns one row per image keyed by ``join_key`` with integer columns
+    ``UL, UR, ML, MR, LL, LR`` (1 = that sextant has a cavity). Rows whose
+    ``sextant`` is missing/``None`` (image-level rows) contribute no zone.
+
+    The OR over zones reproduces the image-level ``cavitiespresent`` flag from
+    :func:`_aggregate_annotations` exactly (verified: 100% agreement on the
+    three held-out countries), so this never contradicts the existing manifest.
+    """
+    if "sextant" not in ann_df.columns:
+        raise KeyError(
+            "annotation table has no 'sextant' column — cannot recover zones. "
+            f"available: {list(ann_df.columns)}"
+        )
+    cav_cols = [
+        c for c in ["smallcavities", "mediumcavities", "largecavities"]
+        if c in ann_df.columns
+    ]
+    if not cav_cols:
+        raise KeyError(
+            "no small/medium/largecavities columns — cannot derive zone cavity."
+        )
+
+    df = ann_df.copy()
+    df["_zone"] = df["sextant"].map(SEXTANT_TO_IDX)
+    df = df.dropna(subset=["_zone"])
+    df["_zone"] = df["_zone"].astype(int)
+    df["_zcav"] = (df[cav_cols].fillna(0) > 0).any(axis=1).astype(int)
+
+    # max over raters -> per (image, zone); pivot -> 6 columns; reindex to fix order.
+    zone = (
+        df.groupby([join_key, "_zone"])["_zcav"].max()
+        .unstack("_zone")
+        .reindex(columns=range(len(SEXTANT_ORDER)), fill_value=0)
+        .fillna(0)
+        .astype(int)
+    )
+    zone.columns = SEXTANT_CODES
+    zone = zone.reset_index()
+
+    n_img = len(zone)
+    pos = int((zone[SEXTANT_CODES].sum(axis=1) > 0).sum())
+    print(
+        f"[tbportals] recovered sextant cavity matrix for {n_img} images "
+        f"({pos} cavity-positive; per-zone rate "
+        f"{ {c: round(float(zone[c].mean()), 3) for c in SEXTANT_CODES} })"
+    )
+    return zone
+
+
 def build_manifest_from_tbportals_zip(
     zip_path: str | Path,
     image_roots: str | Path | list[str | Path],

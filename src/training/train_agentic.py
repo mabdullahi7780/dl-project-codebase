@@ -431,6 +431,8 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
 
     if mode in ("a3",):
         timika_pred = reg_te * 140.0
+        # Per-image epistemic uncertainty on the Timika scale (WS-SP): a3 head is [0,1]x140.
+        ens_std_timika = reg_te_std * 140.0
         alp_pred = np.full_like(timika_pred, np.nan)
         res = evaluate_timika_direct(timika_true, timika_pred)
         res["alp"] = {"mae": float("nan")}
@@ -442,7 +444,7 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         alp_heads = _train_reg_ensemble(Xtr, ya_tr, Xval, ya_val, dim, kind="mlp", loss=cfg.loss,
                                         select_metric=args.select_metric, spatial=False, args=args,
                                         device=device, seed=seed + 7, M=M)
-        alp_te, _ = ensemble_mean([_reg_predict(h, Xte) for h in alp_heads])
+        alp_te, alp_te_std = ensemble_mean([_reg_predict(h, Xte) for h in alp_heads])
         alp_va, _ = ensemble_mean([_reg_predict(h, Xval) for h in alp_heads])
         # Rung 7 also applies to fusion's a2 ALP head (separate target scale: alp/100).
         if cfg.calibrate_pred != "none":
@@ -457,6 +459,11 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         ws = np.linspace(0, 1, 11)
         w = min(ws, key=lambda w: np.mean(np.abs((w * t_a2_va + (1 - w) * t_a3_va) - va_timika)))
         timika_pred = w * t_a2_te + (1 - w) * t_a3_te
+        # Per-image uncertainty (WS-SP): propagate both branch ensemble stds to the Timika
+        # scale and combine in quadrature (a2 ALP head x100, a3 Timika head x140; the +40
+        # discrete cavity term carries no ensemble variance).
+        ens_std_timika = np.sqrt((w * 100.0 * alp_te_std) ** 2
+                                 + ((1 - w) * 140.0 * reg_te_std) ** 2)
         alp_pred = alp_te * 100.0
         res = evaluate_timika_direct(timika_true, timika_pred)
         res["alp"] = {"mae": float(np.mean(np.abs(alp_pred - alp_true)))}
@@ -468,6 +475,8 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
                             cavity_true=cav_true, cavity_prob=cav_prob_te)
         res = evaluate_split(preds, cavity_threshold=cav_thr)
         timika_pred = alp_pred + CAV_BONUS * (cav_prob_te > cav_thr)
+        # Per-image uncertainty (WS-SP): a2/a1 ALP head is [0,1]x100.
+        ens_std_timika = reg_te_std * 100.0
 
     # ── Rung 6: conformal coverage on the Timika scale ──
     cov = width = float("nan")
@@ -513,8 +522,21 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
           f"CI[{ci[0]:.1f},{ci[1]:.1f}] r={t['pearson']:.3f} a={alpha:.2f} "
           f"| base {base_mae:.2f} paper {row['paper_timika_mae']:.2f} -> {verdict}")
 
+    # Per-image cavity outputs for the severe-case false-negative metric (WS-SP).
+    # cav_prob_te is None for a3 (no cavity head) -> write NaN.
+    n_te = len(timika_true)
+    if cav_prob_te is not None:
+        cavity_prob = np.asarray(cav_prob_te, dtype=np.float32)
+        cavity_pred = (cavity_prob > cav_thr).astype(np.float32)
+    else:
+        cavity_prob = np.full(n_te, np.nan, dtype=np.float32)
+        cavity_pred = np.full(n_te, np.nan, dtype=np.float32)
+
     pd.DataFrame({"image_id": te["image_id"].to_numpy(), "held_out": held_out, "seed": seed,
-                  "rung": cfg.name, "timika_true": timika_true, "timika_pred": timika_pred}
+                  "rung": cfg.name, "ensemble": M,
+                  "timika_true": timika_true, "timika_pred": timika_pred,
+                  "ens_std": np.asarray(ens_std_timika, dtype=np.float32),
+                  "cavity_true": cav_true, "cavity_prob": cavity_prob, "cavity_pred": cavity_pred}
                  ).to_csv(out_dir / f"preds_{mode}_{cfg.name}_{held_out}_s{seed}.csv", index=False)
 
     # Optionally pickle trained heads for local qualitative-figure generation later.

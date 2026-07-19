@@ -1,0 +1,4 @@
+country,n_images,n_cavpos_images,zone_auc,pointing_acc,pointing_chance,energy_concentration,control_zone_auc_lr_flip,control_zone_auc_shuffle,zone_auc_ci_lo,zone_auc_ci_hi
+Kazakhstan,325,159,0.8843,0.7862,0.3312,2.3569,0.623,0.5264,0.8483,0.9177
+Moldova,578,193,0.7038,0.3523,0.2772,1.4649,0.8843,0.5332,0.6706,0.7354
+Romania,214,143,0.846,0.7273,0.324,2.2383,0.6428,0.5369,0.8095,0.8797
