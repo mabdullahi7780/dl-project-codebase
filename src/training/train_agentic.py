@@ -37,7 +37,7 @@ import torch
 import torch.nn.functional as F
 
 from scripts.cache_features import load_features
-from src.components.conformal import ensemble_mean, split_conformal
+from src.components.conformal import ensemble_mean, split_conformal, weighted_split_conformal
 from src.components.feature_heads import (
     ClassifierHead,
     CriticHead,
@@ -480,6 +480,7 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
 
     # ── Rung 6: conformal coverage on the Timika scale ──
     cov = width = float("nan")
+    wcov = wwidth = wess = float("nan")
     if cfg.conformal:
         # calibrate on the val split's Timika residuals
         if mode == "a3":
@@ -491,6 +492,13 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         va_t_true = (_timika_target(va).cpu().numpy() * 140.0)
         conf = split_conformal(va_t_true, va_t_pred, timika_pred, timika_true, alpha=0.1)
         cov, width = conf["coverage"], conf["mean_width"]
+        # Covariate-shift-corrected coverage: reweight calibration residuals by the
+        # train->test likelihood ratio over frozen features (unlabeled test only).
+        cal_feats = _pool(Xval).cpu().numpy()
+        test_feats = _pool(Xte).cpu().numpy()
+        wconf = weighted_split_conformal(va_t_true, va_t_pred, cal_feats,
+                                         timika_pred, timika_true, test_feats, alpha=0.1)
+        wcov, wwidth, wess = wconf["coverage"], wconf["mean_width"], wconf["weight_ess"]
 
     t = res["timika"]
     ci = t.get("mae_ci95", (float("nan"), float("nan")))
@@ -515,6 +523,7 @@ def run_cell(mode, held_out, seed, feats, dim, args, device, cfg: RungCfg, out_d
         "timika_mae": t["mae"], "timika_pearson": t["pearson"],
         "timika_mae_ci_lo": ci[0], "timika_mae_ci_hi": ci[1],
         "conformal_cov": cov, "conformal_width": width,
+        "weighted_conformal_cov": wcov, "weighted_conformal_width": wwidth, "weight_ess": wess,
         "base_timika_mae": base_mae, "paper_timika_mae": paper.get(held_out, {}).get("timika_mae", float("nan")),
         "cav_best_val_ce": cav_ce, "verdict": verdict,
     }
